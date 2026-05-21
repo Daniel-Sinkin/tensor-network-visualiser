@@ -195,6 +195,7 @@
   <div class="kb"><span>Contract selection</span><kbd>A</kbd></div>
   <div class="kb"><span>Grab / move selection</span><kbd>G</kbd></div>
   <div class="kb"><span>Copy / paste tensors</span><span>Ctrl C / V</span></div>
+  <div class="kb"><span>Undo</span><span>Ctrl Z</span></div>
   <div class="kb"><span>Delete selected</span><kbd>Del</kbd></div>
   <div class="kb"><span>Cancel</span><kbd>Esc</kbd></div>
   <div class="dim-ctl">
@@ -404,6 +405,47 @@ function logMsg(s) {
   logLines.push(s);
   while (logLines.length > 3) logLines.shift();
   logEl.textContent = logLines.join('\n');
+}
+
+/* ===================== Undo ===================== */
+const undoStack = [];
+const UNDO_CAP = 30;
+function snapshotTensor(t) {
+  return {
+    id: t.id, x: t.x, y: t.y, rank: t.rank, label: t.label, absId: t.absId,
+    dims: t.dims.slice(), legAngles: t.legAngles.slice(),
+    legPrime: t.legPrime.slice(), legId: t.legId.slice(), color: t.color.slice(),
+    data: t.data.slice(), dataIm: t.dataIm ? t.dataIm.slice() : null,
+  };
+}
+function pushUndo() {
+  undoStack.push({
+    tensors: tensors.map(snapshotTensor),
+    bonds: bonds.map(b => ({ id: b.id, a: b.a, ai: b.ai, b: b.b, bi: b.bi })),
+    abstractions: abstractions.map(a => ({
+      id: a.id, type: a.type, name: a.name, members: a.members.slice() })),
+    nextId, nextLabel, nextBondId, nextLegId, nextAbsId,
+    absCount: { MPS: absCount.MPS, MPO: absCount.MPO, PEPS: absCount.PEPS },
+    selection: [...selection], selAbs: [...selAbs],
+  });
+  if (undoStack.length > UNDO_CAP) undoStack.shift();
+}
+function undo() {
+  if (!undoStack.length) { toast('Nothing to undo', true); return; }
+  const s = undoStack.pop();
+  tensors = s.tensors.map(snapshotTensor);
+  bonds = s.bonds.map(b => ({ id: b.id, a: b.a, ai: b.ai, b: b.b, bi: b.bi }));
+  abstractions = s.abstractions.map(a => ({
+    id: a.id, type: a.type, name: a.name, members: a.members.slice() }));
+  nextId = s.nextId; nextLabel = s.nextLabel; nextBondId = s.nextBondId;
+  nextLegId = s.nextLegId; nextAbsId = s.nextAbsId;
+  absCount.MPS = s.absCount.MPS; absCount.MPO = s.absCount.MPO; absCount.PEPS = s.absCount.PEPS;
+  selection = new Set(s.selection);
+  selAbs = new Set(s.selAbs);
+  drag = null; grabbing = null; placing = null;
+  updateInfo();
+  toast('Undo');
+  logMsg('undo — ' + undoStack.length + ' step(s) left');
 }
 
 /* ===================== Geometry ===================== */
@@ -1786,6 +1828,7 @@ function onMouseDown(e) {
       } else if (hit.item.action) {
         const act = hit.item.action;
         radial = null;
+        pushUndo();
         act();
       }
     } else if (!hit) {
@@ -1906,7 +1949,10 @@ function onMouseMove(e) {
     return;
   }
 
-  if (Math.hypot(mouse.x - drag.x0, mouse.y - drag.y0) > MOVE_THRESH) drag.moved = true;
+  if (!drag.moved && Math.hypot(mouse.x - drag.x0, mouse.y - drag.y0) > MOVE_THRESH) {
+    drag.moved = true;
+    if (drag.mode === 'move' || drag.mode === 'leg-rotate') pushUndo();
+  }
 
   if (drag.mode === 'pan') {
     cam.x = drag.camX0 + (mouse.x - drag.x0);
@@ -1956,6 +2002,7 @@ function onMouseUp(e) {
   if (!drag) return;
   const sx = e.clientX, sy = e.clientY;
   const w = screenToWorld(sx, sy);
+  if (drag.mode === 'connect' || drag.mode === 'cut') pushUndo();
 
   if (drag.mode === 'cut') {
     const cw = screenToWorld(sx, sy);
@@ -2019,7 +2066,8 @@ function onKeyDown(e) {
 
   if (e.ctrlKey || e.metaKey) {
     if (e.code === 'KeyC') { e.preventDefault(); copySelection(); }
-    else if (e.code === 'KeyV') { e.preventDefault(); pasteClipboard(); }
+    else if (e.code === 'KeyV') { e.preventDefault(); pushUndo(); pasteClipboard(); }
+    else if (e.code === 'KeyZ') { e.preventDefault(); undo(); }
     return;
   }
 
@@ -2027,26 +2075,30 @@ function onKeyDown(e) {
     e.preventDefault();
     const ids = [...selection];
     if (ids.length !== 2) { toast('Select exactly 2 tensors to link', true); return; }
+    pushUndo();
     const a = getTensor(ids[0]), b = getTensor(ids[1]);
     if (linkTensors(a, b)) { toast('Linked ' + a.label + ' ↔ ' + b.label); updateInfo(); }
   } else if (e.code === 'KeyA') {
+    pushUndo();
     contractSelection(actionTargets());
     updateInfo();
   } else if (e.code === 'Delete' || e.code === 'Backspace') {
     e.preventDefault();
     const tg = actionTargets();
     if (tg.length) {
+      pushUndo();
       deleteTensors(tg);
       updateInfo();
       toast('Deleted ' + tg.length + ' tensor' + (tg.length === 1 ? '' : 's'));
     }
   } else if (e.code === 'KeyS') {
-    if (selection.size === 1) openSplitPopup(mouse.x, mouse.y, [...selection][0]);
+    if (selection.size === 1) { pushUndo(); openSplitPopup(mouse.x, mouse.y, [...selection][0]); }
     else toast('Select exactly one tensor to split', true);
   } else if (e.code === 'KeyG') {
     const tg = actionTargets();
     if (!tg.length) { toast('Nothing selected to grab', true); }
     else {
+      pushUndo();
       const w = screenToWorld(mouse.x, mouse.y);
       grabbing = { ax: w.x, ay: w.y,
                    items: tg.map(id => { const t = getTensor(id); return { id, x0: t.x, y0: t.y }; }) };
