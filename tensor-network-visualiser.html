@@ -133,6 +133,30 @@
   .sp-btn:hover { background: #353f4f; }
   .sp-primary { background: #2f6ad0; border-color: #5b8fe6; color: #fff; }
   .sp-primary:hover { background: #3877e0; }
+  .sp-btn:disabled { opacity: 0.45; cursor: default; }
+
+  #dataWin {
+    width: 322px; padding: 13px 15px; font-size: 12px;
+    display: none; z-index: 30;
+  }
+  #dataWin.show { display: block; }
+  .dw-head { font-size: 12.5px; font-weight: 600; color: #e8edf4; margin-bottom: 2px; }
+  .dw-shape { font-size: 11px; color: #7d8aa0; margin-bottom: 9px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .dw-perm { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
+  .dw-perm select {
+    background: #11151c; border: 1px solid #3a4456; border-radius: 4px;
+    color: #e8edf4; font-size: 11px; padding: 3px 5px; font-family: inherit;
+  }
+  .dw-table {
+    max-height: 244px; overflow-y: auto;
+    border: 1px solid #2b3340; border-radius: 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+  }
+  .dw-row { display: flex; justify-content: space-between; padding: 2.5px 9px; }
+  .dw-row:nth-child(odd) { background: rgba(255,255,255,0.025); }
+  .dw-row .ix { color: #7d8aa0; }
+  .dw-row .vl { color: #d6dce5; }
 
   #toast {
     position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
@@ -242,6 +266,17 @@
   </div>
 </div>
 
+<div id="dataWin" class="panel">
+  <div class="dw-head" id="dwHead">Data</div>
+  <div class="dw-shape" id="dwShape"></div>
+  <div class="dw-perm" id="dwPerm"></div>
+  <div class="dw-table" id="dwTable"></div>
+  <div class="sp-actions">
+    <button id="dwBake" class="sp-btn">Bake reshape</button>
+    <button id="dwClose" class="sp-btn sp-primary">Close</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 <div id="log"></div>
 
@@ -290,6 +325,7 @@ const absCount = { MPS: 0, MPO: 0, PEPS: 0 };
 let builderState = null;     // open builder window: { type, wx, wy }
 let legPopupState = null;    // open add-leg popup: { tid }
 let grabbing = null;         // g-key move: { items:[{id,x0,y0}], ax, ay }
+let dataWinState = null;     // open data window: { tid, perm }
 const mouse = { x: 0, y: 0 };
 
 /* ===================== Small helpers ===================== */
@@ -509,6 +545,38 @@ function setLegDim(t, k, dim) {
     const ot = getTensor(isA ? bo.b : bo.a);
     const oi = isA ? bo.bi : bo.ai;
     if (ot && ot.dims[oi] !== dim) { ot.dims[oi] = dim; rerollData(ot); }
+  }
+}
+function permuteTensorLegs(t, perm) {
+  const oldDims = t.dims.slice();
+  const oldStr = strides(oldDims);
+  const newDims = perm.map(k => oldDims[k]);
+  const n = product(newDims);
+  const nd = makeReal(n);
+  const ndi = t.dataIm ? makeReal(n) : null;
+  const idx = new Array(perm.length).fill(0);
+  for (let r = 0; r < n; r++) {
+    let oldFlat = 0;
+    for (let i = 0; i < perm.length; i++) oldFlat += idx[i] * oldStr[perm[i]];
+    nd[r] = t.data[oldFlat];
+    if (ndi) ndi[r] = t.dataIm[oldFlat];
+    for (let i = perm.length - 1; i >= 0; i--) {
+      if (++idx[i] < newDims[i]) break;
+      idx[i] = 0;
+    }
+  }
+  const oldAngles = t.legAngles, oldPrime = t.legPrime, oldIds = t.legId;
+  t.dims = newDims;
+  t.data = nd;
+  t.dataIm = ndi;
+  t.legAngles = perm.map(k => oldAngles[k]);
+  t.legPrime = perm.map(k => oldPrime[k]);
+  t.legId = perm.map(k => oldIds[k]);
+  const inv = new Array(perm.length);
+  for (let i = 0; i < perm.length; i++) inv[perm[i]] = i;
+  for (const b of bonds) {
+    if (b.a === t.id) b.ai = inv[b.ai];
+    if (b.b === t.id) b.bi = inv[b.bi];
   }
 }
 function copySelection() {
@@ -1007,6 +1075,82 @@ function legPopupAdd() {
     logMsg('added leg dim ' + dim + ' to ' + t.label + ' — now rank ' + t.rank);
   }
   closeLegPopup();
+}
+function openDataWindow(sx, sy, tid) {
+  radial = null;
+  const t = getTensor(tid);
+  if (!t) return;
+  dataWinState = { tid, perm: t.dims.map((_, i) => i) };
+  const win = document.getElementById('dataWin');
+  win.style.left = Math.max(8, Math.min(sx, innerWidth - 342)) + 'px';
+  win.style.top = Math.max(8, Math.min(sy, innerHeight - 400)) + 'px';
+  win.classList.add('show');
+  renderDataWindow();
+}
+function closeDataWindow() {
+  dataWinState = null;
+  document.getElementById('dataWin').classList.remove('show');
+}
+function renderDataWindow() {
+  const t = getTensor(dataWinState.tid);
+  if (!t) { closeDataWindow(); return; }
+  const perm = dataWinState.perm;
+  const pdims = perm.map(k => t.dims[k]);
+  document.getElementById('dwHead').textContent = 'Data — ' + t.label;
+  document.getElementById('dwShape').textContent =
+    'shape [' + pdims.join(', ') + ']  ·  ' + (t.dataIm ? 'complex' : 'real') + ' ' + cfg.prec;
+  const ph = document.getElementById('dwPerm');
+  ph.innerHTML = '';
+  if (t.rank > 1) {
+    for (let i = 0; i < t.rank; i++) {
+      const sel = document.createElement('select');
+      for (let k = 0; k < t.rank; k++) {
+        const o = document.createElement('option');
+        o.value = k; o.textContent = 'leg ' + k;
+        if (perm[i] === k) o.selected = true;
+        sel.appendChild(o);
+      }
+      sel.onchange = () => { dataWinState.perm[i] = parseInt(sel.value, 10); renderDataWindow(); };
+      ph.appendChild(sel);
+    }
+  }
+  const oldStr = strides(t.dims);
+  const n = product(pdims);
+  const cap = Math.min(n, 512);
+  const idx = new Array(t.rank).fill(0);
+  let rows = '';
+  for (let r = 0; r < cap; r++) {
+    let oldFlat = 0;
+    for (let i = 0; i < t.rank; i++) oldFlat += idx[i] * oldStr[perm[i]];
+    const val = t.dataIm
+      ? fmtNum(t.data[oldFlat]) + (t.dataIm[oldFlat] >= 0 ? '+' : '−') +
+        fmtNum(Math.abs(t.dataIm[oldFlat])) + 'i'
+      : fmtNum(t.data[oldFlat]);
+    rows += '<div class="dw-row"><span class="ix">[' + idx.join(',') +
+            ']</span><span class="vl">' + val + '</span></div>';
+    for (let i = t.rank - 1; i >= 0; i--) { if (++idx[i] < pdims[i]) break; idx[i] = 0; }
+  }
+  if (n > cap)
+    rows += '<div class="dw-row"><span class="ix">…</span><span class="vl">' +
+            (n - cap) + ' more entries</span></div>';
+  document.getElementById('dwTable').innerHTML = rows;
+  const bake = document.getElementById('dwBake');
+  bake.disabled = (t.absId != null);
+  bake.textContent = (t.absId != null) ? 'Bake locked in group' : 'Bake reshape';
+}
+function bakeReshape() {
+  if (!dataWinState) return;
+  const t = getTensor(dataWinState.tid);
+  if (!t) { closeDataWindow(); return; }
+  if (t.absId != null) { toast('Cannot reshape a tensor inside an abstraction', true); return; }
+  const perm = dataWinState.perm;
+  if (new Set(perm).size !== t.rank) { toast('Leg permutation is invalid', true); return; }
+  permuteTensorLegs(t, perm);
+  dataWinState.perm = t.dims.map((_, i) => i);
+  updateInfo();
+  renderDataWindow();
+  toast('Baked reshape into ' + t.label);
+  logMsg('baked leg permutation into ' + t.label + ' — shape now [' + t.dims.join(',') + ']');
 }
 function builderBuild() {
   if (!builderState) return;
@@ -1588,6 +1732,7 @@ function openTensorRadial(x, y, tid) {
                     dataIm: t.dataIm ? t.dataIm.slice() : null, label: t.label };
         toast('Click to place the copy  ·  Esc or right-click to cancel'); } },
     { label: 'Split', color: [270, 50, 66], action: () => openSplitPopup(x, y, tid) },
+    { label: 'Data', color: [200, 52, 60], action: () => openDataWindow(x, y, tid) },
     { label: 'Ops', color: [190, 44, 56], children: [
         { label: 'Conj', color: [210, 60, 60], action: () => {
             conjugateTensor(t); updateInfo();
@@ -1631,6 +1776,7 @@ function onMouseDown(e) {
   if (splitState) { closeSplitPopup(); return; }
   if (builderState) { closeBuilder(); return; }
   if (legPopupState) { closeLegPopup(); return; }
+  if (dataWinState) { closeDataWindow(); return; }
 
   if (radial) {                                  // a menu is open
     const hit = radialHitTest(sx, sy);
@@ -1912,6 +2058,7 @@ function onKeyDown(e) {
     if (splitState) closeSplitPopup();
     if (builderState) closeBuilder();
     if (legPopupState) closeLegPopup();
+    if (dataWinState) closeDataWindow();
     if (grabbing) cancelGrab();
   }
 }
@@ -2065,6 +2212,8 @@ function init() {
   document.getElementById('bdCancel').addEventListener('click', closeBuilder);
   document.getElementById('lpDo').addEventListener('click', legPopupAdd);
   document.getElementById('lpCancel').addEventListener('click', closeLegPopup);
+  document.getElementById('dwBake').addEventListener('click', bakeReshape);
+  document.getElementById('dwClose').addEventListener('click', closeDataWindow);
 
   requestAnimationFrame(render);
 }
