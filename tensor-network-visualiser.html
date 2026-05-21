@@ -268,6 +268,7 @@ const F_SMALL = '600 9px -apple-system, "Segoe UI", sans-serif';
 let tensors = [];
 let bonds = [];
 let selection = new Set();
+let selAbs = new Set();      // selected abstraction ids (first-class selection)
 let nextId = 1, nextLabel = 1, nextBondId = 1, nextLegId = 1;
 let defaultDim = 2;
 const cfg = { complex: false, prec: 'f64' };   // numeric type: real/complex, f32/f64
@@ -509,7 +510,7 @@ function setLegDim(t, k, dim) {
   }
 }
 function copySelection() {
-  const ids = [...selection];
+  const ids = actionTargets();
   if (ids.length === 0) { toast('Nothing selected to copy', true); return; }
   const ts = ids.map(getTensor);
   const cx = ts.reduce((s, t) => s + t.x, 0) / ts.length;
@@ -771,17 +772,18 @@ function dissolveAbstraction(absId) {
   if (!ab) return;
   for (const id of ab.members) { const t = getTensor(id); if (t) delete t.absId; }
   abstractions = abstractions.filter(a => a.id !== absId);
+  selAbs.delete(absId);
 }
-function expandAbs(ids) {
-  const out = new Set(ids);
-  for (const id of [...out]) {
-    const t = getTensor(id);
-    if (t && t.absId != null) {
-      const ab = getAbstraction(t.absId);
-      if (ab) for (const m of ab.members) out.add(m);
+function actionTargets() {
+  if (selAbs.size) {
+    const s = new Set();
+    for (const aid of selAbs) {
+      const ab = getAbstraction(aid);
+      if (ab) for (const m of ab.members) s.add(m);
     }
+    return [...s];
   }
-  return out;
+  return [...selection];
 }
 function abstractionBBox(ab) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -799,15 +801,16 @@ function abstractionBBox(ab) {
 function drawAbstraction(ab) {
   const bb = abstractionBBox(ab);
   if (!bb) return;
+  const sel = selAbs.has(ab.id);
   pillPath(bb.x, bb.y, bb.w, bb.h, 13);
-  ctx.fillStyle = 'rgba(150,162,188,0.06)';
+  ctx.fillStyle = sel ? 'rgba(196,210,235,0.10)' : 'rgba(150,162,188,0.06)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(158,170,192,0.5)';
-  ctx.lineWidth = 1.5 / cam.zoom;
+  ctx.strokeStyle = sel ? 'rgba(228,235,246,0.95)' : 'rgba(158,170,192,0.5)';
+  ctx.lineWidth = (sel ? 2.6 : 1.5) / cam.zoom;
   ctx.setLineDash([6 / cam.zoom, 4 / cam.zoom]);
   ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle = '#aab6c8';
+  ctx.fillStyle = sel ? '#eef2f8' : '#aab6c8';
   ctx.font = '600 13px -apple-system, "Segoe UI", sans-serif';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
@@ -1521,7 +1524,8 @@ function openAddRadial(x, y) {
       toast('Added rank-' + r + ' tensor');
     },
   }));
-  if (selection.size === 0) {
+  const tgt = actionTargets();
+  if (tgt.length === 0) {
     items.push({
       label: 'Spawn', color: [150, 48, 60],
       children: [
@@ -1531,16 +1535,18 @@ function openAddRadial(x, y) {
       ],
     });
   }
-  if (selection.size >= 2) {
-    const ids = [...selection];
+  if (tgt.length >= 2) {
     items.push({
       label: 'Contract', color: [280, 55, 64],
       action: () => {
         const w = screenToWorld(x, y);
-        contractSelection(ids, w.x, w.y);
+        contractSelection(tgt, w.x, w.y);
         updateInfo();
       },
     });
+  }
+  if (selection.size >= 2) {
+    const ids = [...selection];
     const mi = analyzeMerge(ids);
     items.push({
       label: 'Merge', color: [200, 46, 58],
@@ -1671,20 +1677,35 @@ function onMouseDown(e) {
     }
     const t = tensorAt(w.x, w.y);
     if (t) {
-      if (e.shiftKey) {
-        if (selection.has(t.id)) selection.delete(t.id);
-        else selection.add(t.id);
-      } else if (!selection.has(t.id)) {
-        selection = new Set([t.id]);
+      if (t.absId != null) {
+        if (selAbs.has(t.absId)) {
+          selection = new Set([t.id]); selAbs = new Set();
+        } else {
+          selAbs = new Set([t.absId]); selection = new Set();
+        }
+        const ab = getAbstraction(t.absId);
+        const movIds = ab ? ab.members : [t.id];
+        const moving = movIds.map(id => {
+          const tt = getTensor(id);
+          return { id, dx: tt.x - w.x, dy: tt.y - w.y };
+        });
+        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+      } else {
+        selAbs = new Set();
+        if (e.shiftKey) {
+          if (selection.has(t.id)) selection.delete(t.id);
+          else selection.add(t.id);
+        } else if (!selection.has(t.id)) {
+          selection = new Set([t.id]);
+        }
+        const moving = [...selection].map(id => {
+          const tt = getTensor(id);
+          return { id, dx: tt.x - w.x, dy: tt.y - w.y };
+        });
+        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
       }
-      selection = expandAbs(selection);
-      const moving = [...selection].map(id => {
-        const tt = getTensor(id);
-        return { id, dx: tt.x - w.x, dy: tt.y - w.y };
-      });
-      drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
     } else {
-      if (!e.shiftKey) selection = new Set();
+      if (!e.shiftKey) { selection = new Set(); selAbs = new Set(); }
       drag = { mode: 'box', x0: sx, y0: sy, bx0: w.x, by0: w.y,
                additive: e.shiftKey, base: new Set(selection) };
     }
@@ -1795,7 +1816,7 @@ function onMouseUp(e) {
     const x1 = Math.max(drag.bx0, w.x), y1 = Math.max(drag.by0, w.y);
     const sel = drag.additive ? drag.base : new Set();
     for (const t of tensors)
-      if (t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1) sel.add(t.id);
+      if (t.absId == null && t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1) sel.add(t.id);
     selection = sel;
     updateInfo();
   }
@@ -1831,15 +1852,15 @@ function onKeyDown(e) {
     const a = getTensor(ids[0]), b = getTensor(ids[1]);
     if (linkTensors(a, b)) { toast('Linked ' + a.label + ' ↔ ' + b.label); updateInfo(); }
   } else if (e.code === 'KeyA') {
-    contractSelection([...selection]);
+    contractSelection(actionTargets());
     updateInfo();
   } else if (e.code === 'Delete' || e.code === 'Backspace') {
     e.preventDefault();
-    if (selection.size) {
-      const n = selection.size;
-      deleteTensors([...selection]);
+    const tg = actionTargets();
+    if (tg.length) {
+      deleteTensors(tg);
       updateInfo();
-      toast('Deleted ' + n + ' tensor' + (n === 1 ? '' : 's'));
+      toast('Deleted ' + tg.length + ' tensor' + (tg.length === 1 ? '' : 's'));
     }
   } else if (e.code === 'KeyS') {
     if (selection.size === 1) openSplitPopup(mouse.x, mouse.y, [...selection][0]);
@@ -1855,6 +1876,27 @@ function onKeyDown(e) {
 
 /* ===================== Info panel ===================== */
 function updateInfo() {
+  if (selAbs.size) {
+    let html = '', tFloats = 0, tMem = 0;
+    for (const aid of selAbs) {
+      const ab = getAbstraction(aid);
+      if (!ab) continue;
+      let fl = 0, mem = 0;
+      for (const id of ab.members) {
+        const t = getTensor(id);
+        if (t) { fl += floatsOf(t); mem += memOf(t); }
+      }
+      tFloats += fl; tMem += mem;
+      html += '<div class="stat-row"><span>' + ab.name + '</span><span class="val">' +
+              ab.type + ' · ' + ab.members.length + ' sites</span></div>';
+    }
+    html += '<div class="stat-row"><span>Total floats</span><span class="val">' +
+            fmtCount(tFloats) + '</span></div>';
+    html += '<div class="stat-row"><span>Total memory</span><span class="val">' +
+            fmtBytes(tMem) + '</span></div>';
+    infoBody.innerHTML = html;
+    return;
+  }
   const ids = [...selection];
   if (ids.length === 0) {
     infoBody.innerHTML =
