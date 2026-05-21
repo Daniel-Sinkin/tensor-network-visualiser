@@ -602,8 +602,11 @@ function bondsCrossedBy(path) {
   for (const b of bonds) {
     const A = getTensor(b.a), B = getTensor(b.b);
     if (!A || !B) continue;
+    const bg = bondGeom(b);
+    const bulge = { x: bg.bulgeX, y: bg.bulgeY };
     for (let i = 0; i + 1 < path.length; i++) {
-      if (segmentsIntersect(path[i], path[i + 1], A, B)) { hit.push(b); break; }
+      if (segmentsIntersect(path[i], path[i + 1], A, bulge) ||
+          segmentsIntersect(path[i], path[i + 1], bulge, B)) { hit.push(b); break; }
     }
   }
   return hit;
@@ -1107,12 +1110,30 @@ function drawGrid() {
     }
 }
 
+function bondGeom(b) {
+  const A = getTensor(b.a), B = getTensor(b.b);
+  const group = bonds.filter(x =>
+    (x.a === b.a && x.b === b.b) || (x.a === b.b && x.b === b.a));
+  group.sort((p, q) => p.id - q.id);
+  const n = group.length;
+  const idx = group.findIndex(x => x.id === b.id);
+  const off = (idx - (n - 1) / 2) * 17;
+  const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+  const dx = B.x - A.x, dy = B.y - A.y;
+  const len = Math.hypot(dx, dy) || 1;
+  const px = -dy / len, py = dx / len;
+  return { A, B, off,
+    bulgeX: mx + px * off, bulgeY: my + py * off,
+    ctrlX: mx + px * off * 2, ctrlY: my + py * off * 2 };
+}
 function drawBond(b) {
   const A = getTensor(b.a), B = getTensor(b.b);
   if (!A || !B) return;
+  const bg = bondGeom(b);
   ctx.beginPath();
   ctx.moveTo(A.x, A.y);
-  ctx.lineTo(B.x, B.y);
+  if (bg.off === 0) ctx.lineTo(B.x, B.y);
+  else ctx.quadraticCurveTo(bg.ctrlX, bg.ctrlY, B.x, B.y);
   if (colKey(A.color) === colKey(B.color)) {
     ctx.strokeStyle = colL(A.color, -4);
   } else {
@@ -1124,8 +1145,8 @@ function drawBond(b) {
   ctx.lineWidth = 3;
   ctx.stroke();
 
-  // bond dimension pill at midpoint
-  const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+  // bond dimension pill at the bulge point
+  const mx = bg.bulgeX, my = bg.bulgeY;
   const txt = String(A.dims[b.ai]);
   ctx.font = F_SMALL;
   const pw = ctx.measureText(txt).width + 8;
