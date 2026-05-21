@@ -140,6 +140,15 @@
   }
   #toast.show { opacity: 1; }
   #toast.warn { border-color: #c4564a; color: #f0b4ac; }
+
+  #log {
+    position: absolute; bottom: 12px; left: 14px;
+    max-width: 480px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px; line-height: 1.55;
+    color: #6f7c92; white-space: pre-wrap;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -216,6 +225,7 @@
 </div>
 
 <div id="toast"></div>
+<div id="log"></div>
 
 <script>
 "use strict";
@@ -226,6 +236,7 @@ const ctx = canvas.getContext('2d');
 const infoBody = document.getElementById('infoBody');
 const dimInput = document.getElementById('dimInput');
 const toastEl = document.getElementById('toast');
+const logEl = document.getElementById('log');
 
 const RADIUS_BASE = 21, RADIUS_PER_RANK = 1.5, RADIUS_MAX = 34, RADIUS_R0 = 24;
 const LEG_STUB = 15;
@@ -330,6 +341,12 @@ function toast(msg, warn) {
   toastEl.className = 'show' + (warn ? ' warn' : '');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { toastEl.className = ''; }, 2600);
+}
+const logLines = [];
+function logMsg(s) {
+  logLines.push(s);
+  while (logLines.length > 3) logLines.shift();
+  logEl.textContent = logLines.join('\n');
 }
 
 /* ===================== Geometry ===================== */
@@ -553,6 +570,7 @@ function cutBond(b) {
 }
 function deleteTensors(ids) {
   const set = new Set(ids);
+  const gone = ids.map(getTensor).filter(Boolean);
   for (const id of ids) {
     const t = getTensor(id);
     if (t && t.absId != null) dissolveAbstraction(t.absId);
@@ -560,6 +578,12 @@ function deleteTensors(ids) {
   tensors = tensors.filter(t => !set.has(t.id));
   bonds = bonds.filter(b => !set.has(b.a) && !set.has(b.b));
   for (const id of ids) selection.delete(id);
+  if (gone.length) {
+    const fl = gone.reduce((s, t) => s + floatsOf(t), 0);
+    logMsg('deleted ' + gone.map(t => t.label).join(', ') + ' — ' +
+           gone.length + ' tensor' + (gone.length === 1 ? '' : 's') + ', ' +
+           fmtCount(fl) + ' floats freed');
+  }
 }
 /* ===================== Contraction engine ===================== */
 function strides(dims) {
@@ -917,6 +941,11 @@ function contractSelection(ids, atX, atY) {
     const t = getTensor(id);
     if (t && t.absId != null) dissolveAbstraction(t.absId);
   }
+  const _inSet = new Set(ids);
+  const _internal = bonds.filter(b => _inSet.has(b.a) && _inSet.has(b.b));
+  const _sharedDims = _internal.map(b => { const t = getTensor(b.a); return t ? t.dims[b.ai] : '?'; });
+  const _inRanks = ids.map(id => { const t = getTensor(id); return t ? t.rank : 0; });
+
   const { inSet, metaByLabel, working } = labelSelection(ids);
 
   let acc;
@@ -959,6 +988,10 @@ function contractSelection(ids, atX, atY) {
   const r = newTensor.rank;
   toast('Contracted ' + S.length + ' tensors → rank ' + r +
         (r === 0 ? '  (scalar = ' + scalarStr(newTensor) + ')' : ''));
+  logMsg('contracted ' + S.length + ' tensors (ranks ' + _inRanks.join(',') + ') over ' +
+         _internal.length + ' shared leg' + (_internal.length === 1 ? '' : 's') +
+         (_internal.length ? ' (dims ' + _sharedDims.join(',') + ')' : '') +
+         ' → ' + newTensor.label + ' rank ' + r);
 }
 /* ===================== Rendering ===================== */
 function buildUsage() {
