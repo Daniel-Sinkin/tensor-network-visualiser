@@ -169,6 +169,7 @@
   <div class="kb"><span>Click / Shift-click</span><span>select</span></div>
   <div class="kb"><span>Link 2 selected</span><kbd>Space</kbd></div>
   <div class="kb"><span>Contract selection</span><kbd>A</kbd></div>
+  <div class="kb"><span>Grab / move selection</span><kbd>G</kbd></div>
   <div class="kb"><span>Copy / paste tensors</span><span>Ctrl C / V</span></div>
   <div class="kb"><span>Delete selected</span><kbd>Del</kbd></div>
   <div class="kb"><span>Cancel</span><kbd>Esc</kbd></div>
@@ -288,6 +289,7 @@ let nextAbsId = 1;
 const absCount = { MPS: 0, MPO: 0, PEPS: 0 };
 let builderState = null;     // open builder window: { type, wx, wy }
 let legPopupState = null;    // open add-leg popup: { tid }
+let grabbing = null;         // g-key move: { items:[{id,x0,y0}], ax, ay }
 const mouse = { x: 0, y: 0 };
 
 /* ===================== Small helpers ===================== */
@@ -555,6 +557,14 @@ function pasteClipboard() {
   selection = new Set(created.map(t => t.id));
   updateInfo();
   toast('Pasted ' + created.length + ' tensor' + (created.length === 1 ? '' : 's'));
+}
+function cancelGrab() {
+  for (const it of grabbing.items) {
+    const t = getTensor(it.id);
+    if (t) { t.x = it.x0; t.y = it.y0; }
+  }
+  grabbing = null;
+  toast('Grab cancelled');
 }
 function placeTensor(spec, x, y) {
   const t = {
@@ -1605,6 +1615,19 @@ function onMouseDown(e) {
   const sx = e.clientX, sy = e.clientY;
   mouse.x = sx; mouse.y = sy;
 
+  if (grabbing) {
+    if (e.button === 0) {
+      const n = grabbing.items.length;
+      grabbing = null;
+      toast('Placed');
+      logMsg('moved ' + n + ' tensor' + (n === 1 ? '' : 's'));
+    } else {
+      cancelGrab();
+    }
+    e.preventDefault();
+    return;
+  }
+
   if (splitState) { closeSplitPopup(); return; }
   if (builderState) { closeBuilder(); return; }
   if (legPopupState) { closeLegPopup(); return; }
@@ -1717,6 +1740,15 @@ function onMouseMove(e) {
   mouse.x = e.clientX; mouse.y = e.clientY;
 
   if (placing) { canvas.style.cursor = 'copy'; return; }
+  if (grabbing) {
+    const w = screenToWorld(mouse.x, mouse.y);
+    for (const it of grabbing.items) {
+      const t = getTensor(it.id);
+      if (t) { t.x = it.x0 + (w.x - grabbing.ax); t.y = it.y0 + (w.y - grabbing.ay); }
+    }
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
 
   if (!drag) {
     const w = screenToWorld(mouse.x, mouse.y);
@@ -1865,12 +1897,22 @@ function onKeyDown(e) {
   } else if (e.code === 'KeyS') {
     if (selection.size === 1) openSplitPopup(mouse.x, mouse.y, [...selection][0]);
     else toast('Select exactly one tensor to split', true);
+  } else if (e.code === 'KeyG') {
+    const tg = actionTargets();
+    if (!tg.length) { toast('Nothing selected to grab', true); }
+    else {
+      const w = screenToWorld(mouse.x, mouse.y);
+      grabbing = { ax: w.x, ay: w.y,
+                   items: tg.map(id => { const t = getTensor(id); return { id, x0: t.x, y0: t.y }; }) };
+      toast('Grabbing — move mouse, click to place, Esc to cancel');
+    }
   } else if (e.code === 'Escape') {
     radial = null; drag = null; connectHoverId = null;
     if (placing) { placing = null; toast('Copy cancelled'); }
     if (splitState) closeSplitPopup();
     if (builderState) closeBuilder();
     if (legPopupState) closeLegPopup();
+    if (grabbing) cancelGrab();
   }
 }
 
