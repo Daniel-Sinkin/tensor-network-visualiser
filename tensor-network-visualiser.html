@@ -148,6 +148,11 @@
     background: #11151c; border: 1px solid #3a4456; border-radius: 4px;
     color: #e8edf4; font-size: 11px; padding: 3px 5px; font-family: inherit;
   }
+  .dw-dims { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-bottom: 9px; }
+  .dw-dims input {
+    width: 40px; background: #11151c; border: 1px solid #3a4456; border-radius: 4px;
+    color: #e8edf4; font-size: 11px; padding: 3px 4px; font-family: inherit;
+  }
   .dw-table {
     max-height: 244px; overflow-y: auto;
     border: 1px solid #2b3340; border-radius: 6px;
@@ -271,6 +276,7 @@
   <div class="dw-head" id="dwHead">Data</div>
   <div class="dw-shape" id="dwShape"></div>
   <div class="dw-perm" id="dwPerm"></div>
+  <div class="dw-dims" id="dwDims"></div>
   <div class="dw-table" id="dwTable"></div>
   <div class="sp-actions">
     <button id="dwBake" class="sp-btn">Bake reshape</button>
@@ -1154,6 +1160,26 @@ function renderDataWindow() {
       }
       sel.onchange = () => { dataWinState.perm[i] = parseInt(sel.value, 10); renderDataWindow(); };
       ph.appendChild(sel);
+    }
+  }
+  const dh = document.getElementById('dwDims');
+  dh.innerHTML = '';
+  if (t.rank > 0) {
+    const lbl = document.createElement('span');
+    lbl.textContent = 'leg dims:';
+    lbl.style.cssText = 'color:#7d8aa0;font-size:10.5px';
+    dh.appendChild(lbl);
+    for (let k = 0; k < t.rank; k++) {
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.min = '1'; inp.max = '64'; inp.value = t.dims[k];
+      const kk = k;
+      inp.onchange = () => {
+        pushUndo();
+        setLegDim(t, kk, clampInt(inp.value, 1, 64, t.dims[kk]));
+        updateInfo();
+        renderDataWindow();
+      };
+      dh.appendChild(inp);
     }
   }
   const oldStr = strides(t.dims);
