@@ -258,7 +258,7 @@ const F_SMALL = '600 9px -apple-system, "Segoe UI", sans-serif';
 let tensors = [];
 let bonds = [];
 let selection = new Set();
-let nextId = 1, nextLabel = 1, nextBondId = 1;
+let nextId = 1, nextLabel = 1, nextBondId = 1, nextLegId = 1;
 let defaultDim = 2;
 const cfg = { complex: false, prec: 'f64' };   // numeric type: real/complex, f32/f64
 let DPR = 1;
@@ -366,6 +366,11 @@ function defaultLegAngles(rank) {
   for (let i = 0; i < rank; i++) a.push(-Math.PI / 2 + i * 2 * Math.PI / rank);
   return a;
 }
+function freshLegIds(n) {
+  const a = [];
+  for (let i = 0; i < n; i++) a.push(nextLegId++);
+  return a;
+}
 function legAngle(t, i) {
   return t.legAngles[i];
 }
@@ -445,6 +450,7 @@ function makeTensorWithDims(x, y, dims) {
   const t = {
     id: nextId++, x, y, rank: dims.length, dims: dims.slice(),
     legAngles: defaultLegAngles(dims.length),
+    legPrime: new Array(dims.length).fill(0), legId: freshLegIds(dims.length),
     color: rankHSL(dims.length).slice(),
     data: randn(n), dataIm: cfg.complex ? randn(n) : null,
     label: 'T' + (nextLabel++),
@@ -466,11 +472,19 @@ function largestGapAngle(t) {
   }
   return bestMid;
 }
-function addLeg(t) {
+function addLeg(t, dim) {
   t.legAngles.push(largestGapAngle(t));
-  t.dims.push(defaultDim);
+  t.dims.push(dim || defaultDim);
+  t.legPrime.push(0);
+  t.legId.push(nextLegId++);
   t.rank += 1;
   rerollData(t);
+}
+function primeTensor(t, delta) {
+  for (let k = 0; k < t.rank; k++) t.legPrime[k] = Math.max(0, t.legPrime[k] + delta);
+}
+function conjugateTensor(t) {
+  if (t.dataIm) for (let i = 0; i < t.dataIm.length; i++) t.dataIm[i] = -t.dataIm[i];
 }
 function copySelection() {
   const ids = [...selection];
@@ -483,6 +497,7 @@ function copySelection() {
   const specs = ts.map(t => ({
     dx: t.x - cx, dy: t.y - cy,
     rank: t.rank, dims: t.dims.slice(), legAngles: t.legAngles.slice(),
+    legPrime: t.legPrime.slice(),
     color: t.color.slice(), data: t.data.slice(),
     dataIm: t.dataIm ? t.dataIm.slice() : null,
   }));
@@ -502,6 +517,8 @@ function pasteClipboard() {
     const t = {
       id: nextId++, x: w.x + spec.dx, y: w.y + spec.dy,
       rank: spec.rank, dims: spec.dims.slice(), legAngles: spec.legAngles.slice(),
+      legPrime: spec.legPrime ? spec.legPrime.slice() : new Array(spec.rank).fill(0),
+      legId: freshLegIds(spec.rank),
       color: spec.color.slice(), data: spec.data.slice(),
       dataIm: spec.dataIm ? spec.dataIm.slice() : null,
       label: 'T' + (nextLabel++),
@@ -520,6 +537,8 @@ function placeTensor(spec, x, y) {
   const t = {
     id: nextId++, x, y, rank: spec.rank, dims: spec.dims.slice(),
     legAngles: spec.legAngles.slice(), color: spec.color.slice(),
+    legPrime: spec.legPrime ? spec.legPrime.slice() : new Array(spec.rank).fill(0),
+    legId: freshLegIds(spec.rank),
     data: spec.data.slice(), dataIm: spec.dataIm ? spec.dataIm.slice() : null,
     label: 'T' + (nextLabel++),
   };
@@ -971,6 +990,7 @@ function contractSelection(ids, atX, atY) {
     id: nextId++, x: cx, y: cy,
     rank: acc.labels.length, dims: acc.dims.slice(),
     legAngles: defaultLegAngles(acc.labels.length),
+    legPrime: new Array(acc.labels.length).fill(0), legId: freshLegIds(acc.labels.length),
     color: rankHSL(acc.labels.length).slice(),
     data: acc.data, dataIm: acc.dataIm, label: 'T' + (nextLabel++),
   };
@@ -1103,6 +1123,16 @@ function drawFreeLegs(t, used) {
     ctx.arc(x2, y2, active ? 4 : 2.4, 0, 2 * Math.PI);
     ctx.fillStyle = active ? '#ffffff' : colL(t.color, 10);
     ctx.fill();
+    if (t.legPrime && t.legPrime[i] > 0) {
+      const p = t.legPrime[i];
+      ctx.fillStyle = '#d6dce5';
+      ctx.font = F_SMALL;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(p <= 4 ? "'".repeat(p) : p + "'",
+                   t.x + Math.cos(a) * (r + LEG_STUB + 8),
+                   t.y + Math.sin(a) * (r + LEG_STUB + 8));
+    }
   }
 }
 
@@ -1459,10 +1489,22 @@ function openTensorRadial(x, y, tid) {
         toast('Added a leg to ' + t.label + ' — now rank ' + t.rank); } },
     { label: 'Copy', color: [145, 46, 54], action: () => {
         placing = { rank: t.rank, dims: t.dims.slice(), legAngles: t.legAngles.slice(),
+                    legPrime: t.legPrime.slice(),
                     color: t.color.slice(), data: t.data.slice(),
                     dataIm: t.dataIm ? t.dataIm.slice() : null, label: t.label };
         toast('Click to place the copy  ·  Esc or right-click to cancel'); } },
     { label: 'Split', color: [270, 50, 66], action: () => openSplitPopup(x, y, tid) },
+    { label: 'Ops', color: [190, 44, 56], children: [
+        { label: 'Conj', color: [210, 60, 60], action: () => {
+            conjugateTensor(t); updateInfo();
+            toast('Conjugated ' + t.label); logMsg('conjugated ' + t.label); } },
+        { label: 'Prime', color: [44, 80, 60], action: () => {
+            primeTensor(t, 1); updateInfo();
+            toast('Primed ' + t.label); logMsg('primed all legs of ' + t.label); } },
+        { label: 'Unprime', color: [344, 56, 60], action: () => {
+            primeTensor(t, -1); updateInfo();
+            toast('Unprimed ' + t.label); logMsg('unprimed all legs of ' + t.label); } },
+    ] },
   ];
   if (t.absId != null) {
     items.push({ label: 'Ungroup', color: [200, 46, 58], action: () => {
