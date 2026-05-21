@@ -102,11 +102,11 @@
     border: 1px solid rgba(255,255,255,0.2);
   }
 
-  #splitPopup, #builder {
+  #splitPopup, #builder, #legPopup {
     width: 234px; padding: 13px 15px; font-size: 12px;
     display: none; z-index: 30;
   }
-  #splitPopup.show, #builder.show { display: block; }
+  #splitPopup.show, #builder.show, #legPopup.show { display: block; }
   .sp-head { font-size: 12.5px; font-weight: 600; color: #e8edf4; margin-bottom: 3px; }
   .sp-sub { font-size: 10.5px; color: #7d8aa0; line-height: 1.45; margin-bottom: 10px; }
   .sp-legs { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -231,6 +231,16 @@
   </div>
 </div>
 
+<div id="legPopup" class="panel">
+  <div class="sp-head" id="lpHead">Add a leg</div>
+  <div class="sp-sub">Choose the dimension of the new leg.</div>
+  <div class="sp-ctl"><label for="lpDim">Dimension</label><input id="lpDim" type="number" min="1" max="64" value="2"></div>
+  <div class="sp-actions">
+    <button id="lpCancel" class="sp-btn">Cancel</button>
+    <button id="lpDo" class="sp-btn sp-primary">Add leg</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 <div id="log"></div>
 
@@ -276,6 +286,7 @@ let abstractions = [];       // tensor-network groupings (MPS / MPO / PEPS)
 let nextAbsId = 1;
 const absCount = { MPS: 0, MPO: 0, PEPS: 0 };
 let builderState = null;     // open builder window: { type, wx, wy }
+let legPopupState = null;    // open add-leg popup: { tid }
 const mouse = { x: 0, y: 0 };
 
 /* ===================== Small helpers ===================== */
@@ -485,6 +496,17 @@ function primeTensor(t, delta) {
 }
 function conjugateTensor(t) {
   if (t.dataIm) for (let i = 0; i < t.dataIm.length; i++) t.dataIm[i] = -t.dataIm[i];
+}
+function setLegDim(t, k, dim) {
+  t.dims[k] = dim;
+  rerollData(t);
+  const bo = bondAt(t.id, k);
+  if (bo) {
+    const isA = (bo.a === t.id && bo.ai === k);
+    const ot = getTensor(isA ? bo.b : bo.a);
+    const oi = isA ? bo.bi : bo.ai;
+    if (ot && ot.dims[oi] !== dim) { ot.dims[oi] = dim; rerollData(ot); }
+  }
 }
 function copySelection() {
   const ids = [...selection];
@@ -944,6 +966,32 @@ function closeBuilder() {
   builderState = null;
   document.getElementById('builder').classList.remove('show');
 }
+function openLegPopup(sx, sy, tid) {
+  radial = null;
+  legPopupState = { tid };
+  const t = getTensor(tid);
+  document.getElementById('lpHead').textContent = 'Add a leg to ' + (t ? t.label : '');
+  const pop = document.getElementById('legPopup');
+  pop.style.left = Math.max(8, Math.min(sx, innerWidth - 252)) + 'px';
+  pop.style.top = Math.max(8, Math.min(sy, innerHeight - 170)) + 'px';
+  pop.classList.add('show');
+}
+function closeLegPopup() {
+  legPopupState = null;
+  document.getElementById('legPopup').classList.remove('show');
+}
+function legPopupAdd() {
+  if (!legPopupState) return;
+  const t = getTensor(legPopupState.tid);
+  if (t) {
+    const dim = clampInt(document.getElementById('lpDim').value, 1, 64, 2);
+    addLeg(t, dim);
+    updateInfo();
+    toast('Added a leg (dim ' + dim + ') to ' + t.label);
+    logMsg('added leg dim ' + dim + ' to ' + t.label + ' — now rank ' + t.rank);
+  }
+  closeLegPopup();
+}
 function builderBuild() {
   if (!builderState) return;
   const chi = clampInt(document.getElementById('bdChi').value, 1, 64, 2);
@@ -1101,6 +1149,7 @@ function legIsActive(tid, i) {
 
 function drawFreeLegs(t, used) {
   const r = radiusOf(t);
+  const showDims = selection.has(t.id) || used.size > 0;
   for (let i = 0; i < t.rank; i++) {
     if (used.has(i)) continue;
     const a = legAngle(t, i);
@@ -1123,6 +1172,16 @@ function drawFreeLegs(t, used) {
     ctx.arc(x2, y2, active ? 4 : 2.4, 0, 2 * Math.PI);
     ctx.fillStyle = active ? '#ffffff' : colL(t.color, 10);
     ctx.fill();
+    if (showDims) {
+      const dm = r + LEG_STUB * 0.5;
+      ctx.fillStyle = '#8b97a8';
+      ctx.font = F_SMALL;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(String(t.dims[i]),
+                   t.x + Math.cos(a) * dm + Math.cos(a + Math.PI / 2) * 7,
+                   t.y + Math.sin(a) * dm + Math.sin(a + Math.PI / 2) * 7);
+    }
     if (t.legPrime && t.legPrime[i] > 0) {
       const p = t.legPrime[i];
       ctx.fillStyle = '#d6dce5';
@@ -1484,9 +1543,7 @@ function openTensorRadial(x, y, tid) {
         deleteTensors([tid]); updateInfo(); toast('Deleted ' + t.label); } },
     { label: 'Roll', color: [210, 60, 60], action: () => {
         rerollData(t); toast('Re-rolled data for ' + t.label); } },
-    { label: '+Leg', color: [186, 54, 52], action: () => {
-        addLeg(t); updateInfo();
-        toast('Added a leg to ' + t.label + ' — now rank ' + t.rank); } },
+    { label: '+Leg', color: [186, 54, 52], action: () => openLegPopup(x, y, tid) },
     { label: 'Copy', color: [145, 46, 54], action: () => {
         placing = { rank: t.rank, dims: t.dims.slice(), legAngles: t.legAngles.slice(),
                     legPrime: t.legPrime.slice(),
@@ -1523,6 +1580,7 @@ function onMouseDown(e) {
 
   if (splitState) { closeSplitPopup(); return; }
   if (builderState) { closeBuilder(); return; }
+  if (legPopupState) { closeLegPopup(); return; }
 
   if (radial) {                                  // a menu is open
     const hit = radialHitTest(sx, sy);
@@ -1770,6 +1828,7 @@ function onKeyDown(e) {
     if (placing) { placing = null; toast('Copy cancelled'); }
     if (splitState) closeSplitPopup();
     if (builderState) closeBuilder();
+    if (legPopupState) closeLegPopup();
   }
 }
 
@@ -1899,6 +1958,8 @@ function init() {
   document.getElementById('spCancel').addEventListener('click', closeSplitPopup);
   document.getElementById('bdDo').addEventListener('click', builderBuild);
   document.getElementById('bdCancel').addEventListener('click', closeBuilder);
+  document.getElementById('lpDo').addEventListener('click', legPopupAdd);
+  document.getElementById('lpCancel').addEventListener('click', closeLegPopup);
 
   requestAnimationFrame(render);
 }
