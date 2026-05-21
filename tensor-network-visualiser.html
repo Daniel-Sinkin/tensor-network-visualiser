@@ -1,0 +1,1821 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tensor Network Visualiser</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #0e1116;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #d6dce5;
+    user-select: none;
+  }
+  #canvas { display: block; position: absolute; top: 0; left: 0; cursor: default; }
+
+  .panel {
+    position: absolute;
+    background: rgba(22, 27, 35, 0.92);
+    border: 1px solid #2b3340;
+    border-radius: 10px;
+    backdrop-filter: blur(6px);
+    box-shadow: 0 6px 24px rgba(0,0,0,0.4);
+  }
+
+  /* Info panel (selection) */
+  #info {
+    top: 14px; right: 14px;
+    width: 270px;
+    padding: 14px 16px;
+    font-size: 12.5px;
+  }
+  #info h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #7d8aa0; margin-bottom: 10px; font-weight: 600;
+  }
+  #info .stat-row {
+    display: flex; justify-content: space-between;
+    padding: 3px 0; color: #aeb8c8;
+  }
+  #info .stat-row .val { color: #e8edf4; font-variant-numeric: tabular-nums; }
+  #info .sel-list {
+    margin-top: 10px; max-height: 180px; overflow-y: auto;
+    border-top: 1px solid #2b3340; padding-top: 8px;
+  }
+  #info .sel-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; font-size: 12px;
+  }
+  #info .sel-item .dot {
+    width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.25);
+  }
+  #info .sel-item .meta { color: #8b97a8; margin-left: auto; font-variant-numeric: tabular-nums; }
+  #info .contract-hint {
+    margin-top: 10px; padding: 8px 10px; border-radius: 6px;
+    background: rgba(86, 156, 214, 0.12);
+    border: 1px solid rgba(86, 156, 214, 0.3);
+    color: #9ecbf0; font-size: 11.5px; line-height: 1.5;
+  }
+  #info .empty { color: #5e6a7d; font-style: italic; }
+
+  /* Controls / legend panel */
+  #controls {
+    top: 14px; left: 14px;
+    width: 232px;
+    padding: 13px 15px;
+    font-size: 11.5px;
+  }
+  #controls h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: #7d8aa0; margin-bottom: 9px; font-weight: 600;
+  }
+  #controls .kb { display: flex; justify-content: space-between; padding: 2.5px 0; color: #9aa6b8; }
+  #controls .kb kbd {
+    background: #2b3340; border: 1px solid #3a4456; border-radius: 4px;
+    padding: 1px 6px; font-size: 10.5px; color: #c8d2e0;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  #controls .dim-ctl {
+    margin-top: 10px; border-top: 1px solid #2b3340; padding-top: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #controls .dim-ctl label { color: #9aa6b8; }
+  #controls .dim-ctl input, #controls .dim-ctl select {
+    background: #11151c; border: 1px solid #3a4456;
+    border-radius: 5px; color: #e8edf4; padding: 4px 7px; font-size: 12px;
+    font-family: inherit;
+  }
+  #controls .dim-ctl input { width: 56px; }
+  #controls .dim-ctl select { width: 86px; }
+  #controls .legend {
+    margin-top: 10px; border-top: 1px solid #2b3340; padding-top: 9px;
+  }
+  #controls .legend-title { color: #7d8aa0; margin-bottom: 6px; font-size: 10.5px;
+    text-transform: uppercase; letter-spacing: 0.06em; }
+  #controls .legend-grid { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+  #controls .legend-item { display: flex; align-items: center; gap: 5px; color: #9aa6b8; }
+  #controls .legend-item .dot {
+    width: 11px; height: 11px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.2);
+  }
+
+  #splitPopup, #builder {
+    width: 234px; padding: 13px 15px; font-size: 12px;
+    display: none; z-index: 30;
+  }
+  #splitPopup.show, #builder.show { display: block; }
+  .sp-head { font-size: 12.5px; font-weight: 600; color: #e8edf4; margin-bottom: 3px; }
+  .sp-sub { font-size: 10.5px; color: #7d8aa0; line-height: 1.45; margin-bottom: 10px; }
+  .sp-legs { display: flex; flex-wrap: wrap; gap: 5px; }
+  .sp-leg {
+    padding: 4px 9px; border-radius: 5px; cursor: pointer; font-size: 11px;
+    border: 1px solid #3a4456; user-select: none;
+  }
+  .sp-leg.sideA { background: #2f6ad0; color: #fff; border-color: #5b8fe6; }
+  .sp-leg.sideB { background: #1b2330; color: #98a4b6; }
+  .sp-ctl { display: flex; align-items: center; justify-content: space-between; margin-top: 9px; }
+  .sp-ctl label { color: #9aa6b8; }
+  .sp-ctl select, .sp-ctl input {
+    width: 96px; background: #11151c; border: 1px solid #3a4456; border-radius: 5px;
+    color: #e8edf4; padding: 4px 7px; font-size: 12px; font-family: inherit;
+  }
+  .sp-actions { display: flex; gap: 8px; margin-top: 13px; }
+  .sp-btn {
+    flex: 1; padding: 6px 0; border-radius: 6px; cursor: pointer; font-size: 12px;
+    background: #2b3340; border: 1px solid #3a4456; color: #d6dce5; font-family: inherit;
+  }
+  .sp-btn:hover { background: #353f4f; }
+  .sp-primary { background: #2f6ad0; border-color: #5b8fe6; color: #fff; }
+  .sp-primary:hover { background: #3877e0; }
+
+  #toast {
+    position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: rgba(28, 34, 44, 0.96); border: 1px solid #3a4456;
+    color: #e8edf4; padding: 9px 18px; border-radius: 8px; font-size: 12.5px;
+    opacity: 0; transition: opacity 0.25s; pointer-events: none;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.5);
+  }
+  #toast.show { opacity: 1; }
+  #toast.warn { border-color: #c4564a; color: #f0b4ac; }
+</style>
+</head>
+<body>
+<canvas id="canvas"></canvas>
+
+<div id="controls" class="panel">
+  <h2>Tensor Network Visualiser</h2>
+  <div class="kb"><span>Drag</span><span>move tensor</span></div>
+  <div class="kb"><span>Drag free-leg tip</span><span>rotate / connect</span></div>
+  <div class="kb"><span>Right-click empty</span><kbd>radial menu</kbd></div>
+  <div class="kb"><span>Right-drag tensor</span><span>connect</span></div>
+  <div class="kb"><span>Ctrl + right-drag</span><span>cut bonds</span></div>
+  <div class="kb"><span>Middle-drag</span><span>pan view</span></div>
+  <div class="kb"><span>Scroll wheel</span><span>zoom in / out</span></div>
+  <div class="kb"><span>Click / Shift-click</span><span>select</span></div>
+  <div class="kb"><span>Link 2 selected</span><kbd>Space</kbd></div>
+  <div class="kb"><span>Contract selection</span><kbd>A</kbd></div>
+  <div class="kb"><span>Copy / paste tensors</span><span>Ctrl C / V</span></div>
+  <div class="kb"><span>Delete selected</span><kbd>Del</kbd></div>
+  <div class="kb"><span>Cancel</span><kbd>Esc</kbd></div>
+  <div class="dim-ctl">
+    <label for="dimInput">Default bond dim</label>
+    <input id="dimInput" type="number" min="1" max="64" value="2">
+  </div>
+  <div class="dim-ctl">
+    <label for="typeSel">Number type</label>
+    <select id="typeSel"><option value="real">Real</option><option value="complex">Complex</option></select>
+  </div>
+  <div class="dim-ctl">
+    <label for="precSel">Precision</label>
+    <select id="precSel"><option value="f64">f64</option><option value="f32">f32</option></select>
+  </div>
+  <div class="legend">
+    <div class="legend-title">Colour by rank</div>
+    <div class="legend-grid" id="legendGrid"></div>
+  </div>
+</div>
+
+<div id="info" class="panel">
+  <h2>Selection</h2>
+  <div id="infoBody"></div>
+</div>
+
+<div id="splitPopup" class="panel">
+  <div class="sp-head" id="spHead">Split tensor</div>
+  <div class="sp-sub">Blue legs go to factor A, grey to factor B. Click a leg to flip it.</div>
+  <div class="sp-legs" id="spLegs"></div>
+  <div class="sp-ctl">
+    <label for="spMethod">Method</label>
+    <select id="spMethod"><option>SVD</option><option>QR</option><option>Eigen</option></select>
+  </div>
+  <div class="sp-ctl">
+    <label for="spBond">New bond dim</label>
+    <input id="spBond" type="number" min="1" max="64" value="2">
+  </div>
+  <div class="sp-actions">
+    <button id="spCancel" class="sp-btn">Cancel</button>
+    <button id="spDo" class="sp-btn sp-primary">Split</button>
+  </div>
+</div>
+
+<div id="builder" class="panel">
+  <div class="sp-head" id="bdHead">Build MPS</div>
+  <div class="sp-sub">Parameters for the new tensor network.</div>
+  <div class="sp-ctl" id="bdRowN"><label for="bdN">Sites</label><input id="bdN" type="number" min="1" max="40" value="5"></div>
+  <div class="sp-ctl" id="bdRowRows"><label for="bdRows">Rows</label><input id="bdRows" type="number" min="1" max="10" value="3"></div>
+  <div class="sp-ctl" id="bdRowCols"><label for="bdCols">Columns</label><input id="bdCols" type="number" min="1" max="10" value="3"></div>
+  <div class="sp-ctl"><label for="bdChi">Bond dim</label><input id="bdChi" type="number" min="1" max="64" value="2"></div>
+  <div class="sp-ctl"><label for="bdPhys">Physical dim</label><input id="bdPhys" type="number" min="1" max="64" value="2"></div>
+  <div class="sp-actions">
+    <button id="bdCancel" class="sp-btn">Cancel</button>
+    <button id="bdDo" class="sp-btn sp-primary">Build</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+/* ===================== Setup & state ===================== */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const infoBody = document.getElementById('infoBody');
+const dimInput = document.getElementById('dimInput');
+const toastEl = document.getElementById('toast');
+
+const RADIUS_BASE = 21, RADIUS_PER_RANK = 1.5, RADIUS_MAX = 34, RADIUS_R0 = 24;
+const LEG_STUB = 15;
+const MOVE_THRESH = 5;
+const MAX_TENSOR_SIZE = 1 << 22;          // 4,194,304 elements (~32 MB)
+const HUB_R = 27, RING_W = 58, RING_GAP = 4;
+
+const F_BODY  = '600 12px -apple-system, "Segoe UI", Roboto, sans-serif';
+const F_MONO  = '600 10px "SF Mono", Menlo, Consolas, monospace';
+const F_SMALL = '600 9px -apple-system, "Segoe UI", sans-serif';
+
+let tensors = [];
+let bonds = [];
+let selection = new Set();
+let nextId = 1, nextLabel = 1, nextBondId = 1;
+let defaultDim = 2;
+const cfg = { complex: false, prec: 'f64' };   // numeric type: real/complex, f32/f64
+let DPR = 1;
+const cam = { x: 0, y: 0, zoom: 1 };   // screen(css px) = world * zoom + (x, y)
+
+let drag = null;             // {mode, ...}
+let radial = null;           // {cx, cy, items:[{label,color,action,x,y}]}
+let hoverId = null;
+let connectHoverId = null;
+let hoverLeg = null;         // {tensorId, legIndex} of a free-leg tip under the cursor
+let placing = null;          // copy ghost: spec of a tensor awaiting placement
+let splitState = null;       // open split popup: { tid, sideA: Set }
+let clipboard = null;        // Ctrl+C clipboard: { specs, bonds }
+let abstractions = [];       // tensor-network groupings (MPS / MPO / PEPS)
+let nextAbsId = 1;
+const absCount = { MPS: 0, MPO: 0, PEPS: 0 };
+let builderState = null;     // open builder window: { type, wx, wy }
+const mouse = { x: 0, y: 0 };
+
+/* ===================== Small helpers ===================== */
+function clamp(v, lo, hi) { return v < lo ? lo : (v > hi ? hi : v); }
+function product(arr) { let p = 1; for (const x of arr) p *= x; return p; }
+function getTensor(id) { return tensors.find(t => t.id === id); }
+function screenToWorld(sx, sy) {
+  return { x: (sx - cam.x) / cam.zoom, y: (sy - cam.y) / cam.zoom };
+}
+
+function gaussian() {
+  let u = 0, v = 0;
+  while (u === 0) u = Math.random();
+  while (v === 0) v = Math.random();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function makeReal(n) { return cfg.prec === 'f32' ? new Float32Array(n) : new Float64Array(n); }
+function randn(n) {
+  const a = makeReal(n);
+  for (let i = 0; i < n; i++) a[i] = gaussian();
+  return a;
+}
+
+const RANK_PALETTE = [
+  [44, 86, 62], [210, 60, 60], [145, 46, 54], [30, 74, 58],
+  [344, 58, 60], [270, 50, 66], [186, 54, 52],
+];
+function rankHSL(r) {
+  if (r < RANK_PALETTE.length) return RANK_PALETTE[r];
+  return [(r * 53) % 360, 52, 58];
+}
+function rankColor(r) { const c = rankHSL(r); return `hsl(${c[0]},${c[1]}%,${c[2]}%)`; }
+function colStr(c) { return `hsl(${c[0]},${c[1]}%,${c[2]}%)`; }
+function colL(c, dl) { return `hsl(${c[0]},${c[1]}%,${clamp(c[2] + dl, 4, 96)}%)`; }
+function colKey(c) { return c[0] + '_' + c[1] + '_' + c[2]; }
+
+function fmtBytes(b) {
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b / 1024).toFixed(1) + ' KB';
+  if (b < 1073741824) return (b / 1048576).toFixed(2) + ' MB';
+  return (b / 1073741824).toFixed(2) + ' GB';
+}
+function fmtCount(n) { return n.toLocaleString('en-US'); }
+function bytesPerFloat() { return cfg.prec === 'f32' ? 4 : 8; }
+function floatsOf(t) { return product(t.dims) * (t.dataIm ? 2 : 1); }
+function memOf(t) { return floatsOf(t) * bytesPerFloat(); }
+function scalarStr(t) {
+  if (t.dataIm) {
+    const im = t.dataIm[0];
+    return fmtNum(t.data[0]) + (im >= 0 ? ' + ' : ' − ') + fmtNum(Math.abs(im)) + 'i';
+  }
+  return fmtNum(t.data[0]);
+}
+function fmtNum(x) {
+  if (x === 0) return '0';
+  const a = Math.abs(x);
+  if (a >= 1e5 || a < 1e-3) return x.toExponential(3);
+  return x.toFixed(4);
+}
+function fmtNumShort(x) {
+  if (x === 0) return '0';
+  const a = Math.abs(x);
+  if (a >= 1e4 || a < 1e-2) return x.toExponential(1);
+  return (Math.round(x * 100) / 100).toString();
+}
+
+let toastTimer = null;
+function toast(msg, warn) {
+  toastEl.textContent = msg;
+  toastEl.className = 'show' + (warn ? ' warn' : '');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.className = ''; }, 2600);
+}
+
+/* ===================== Geometry ===================== */
+function radiusOf(t) {
+  if (t.rank === 0) return RADIUS_R0;
+  return Math.min(RADIUS_MAX, RADIUS_BASE + t.rank * RADIUS_PER_RANK);
+}
+function defaultLegAngles(rank) {
+  const a = [];
+  for (let i = 0; i < rank; i++) a.push(-Math.PI / 2 + i * 2 * Math.PI / rank);
+  return a;
+}
+function legAngle(t, i) {
+  return t.legAngles[i];
+}
+function legPoint(t, i) {
+  const a = legAngle(t, i), r = radiusOf(t);
+  return { x: t.x + Math.cos(a) * r, y: t.y + Math.sin(a) * r };
+}
+function angleDiff(a, b) {
+  let d = (a - b) % (2 * Math.PI);
+  if (d > Math.PI) d -= 2 * Math.PI;
+  if (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+function tensorAt(x, y) {
+  for (let i = tensors.length - 1; i >= 0; i--) {
+    const t = tensors[i], r = radiusOf(t);
+    if ((x - t.x) ** 2 + (y - t.y) ** 2 <= r * r) return t;
+  }
+  return null;
+}
+
+/* ===================== Bond / leg model ===================== */
+function bondAt(tid, i) {
+  for (const b of bonds) {
+    if ((b.a === tid && b.ai === i) || (b.b === tid && b.bi === i)) return b;
+  }
+  return null;
+}
+function usedLegSet(tid) {
+  const s = new Set();
+  for (const b of bonds) {
+    if (b.a === tid) s.add(b.ai);
+    if (b.b === tid) s.add(b.bi);
+  }
+  return s;
+}
+function freeLegCount(t) { return t.rank - usedLegSet(t.id).size; }
+
+function bestFreeLegToward(t, tx, ty) {
+  const used = usedLegSet(t.id);
+  const want = Math.atan2(ty - t.y, tx - t.x);
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < t.rank; i++) {
+    if (used.has(i)) continue;
+    const d = Math.abs(angleDiff(legAngle(t, i), want));
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  return best;
+}
+
+// Find a free-leg tip near a world point (grab zone stays ~constant in screen px).
+function freeLegTipAt(wx, wy) {
+  const grab = 11 / cam.zoom;
+  for (let k = tensors.length - 1; k >= 0; k--) {
+    const t = tensors[k];
+    const used = usedLegSet(t.id);
+    const r = radiusOf(t);
+    for (let i = 0; i < t.rank; i++) {
+      if (used.has(i)) continue;
+      const a = legAngle(t, i);
+      const tx = t.x + Math.cos(a) * (r + LEG_STUB);
+      const ty = t.y + Math.sin(a) * (r + LEG_STUB);
+      if ((wx - tx) ** 2 + (wy - ty) ** 2 <= grab * grab)
+        return { tensor: t, legIndex: i };
+    }
+  }
+  return null;
+}
+
+function rerollData(t) {
+  const n = product(t.dims);
+  t.data = randn(n);
+  t.dataIm = cfg.complex ? randn(n) : null;
+}
+function makeTensorWithDims(x, y, dims) {
+  const n = product(dims);
+  const t = {
+    id: nextId++, x, y, rank: dims.length, dims: dims.slice(),
+    legAngles: defaultLegAngles(dims.length),
+    color: rankHSL(dims.length).slice(),
+    data: randn(n), dataIm: cfg.complex ? randn(n) : null,
+    label: 'T' + (nextLabel++),
+  };
+  tensors.push(t);
+  return t;
+}
+function addTensor(x, y, rank) {
+  return makeTensorWithDims(x, y, new Array(rank).fill(defaultDim));
+}
+function largestGapAngle(t) {
+  if (t.legAngles.length === 0) return -Math.PI / 2;
+  const sorted = t.legAngles.slice().sort((a, b) => a - b);
+  let bestGap = -1, bestMid = -Math.PI / 2;
+  for (let i = 0; i < sorted.length; i++) {
+    const a = sorted[i];
+    const b = (i + 1 < sorted.length) ? sorted[i + 1] : sorted[0] + 2 * Math.PI;
+    if (b - a > bestGap) { bestGap = b - a; bestMid = (a + b) / 2; }
+  }
+  return bestMid;
+}
+function addLeg(t) {
+  t.legAngles.push(largestGapAngle(t));
+  t.dims.push(defaultDim);
+  t.rank += 1;
+  rerollData(t);
+}
+function copySelection() {
+  const ids = [...selection];
+  if (ids.length === 0) { toast('Nothing selected to copy', true); return; }
+  const ts = ids.map(getTensor);
+  const cx = ts.reduce((s, t) => s + t.x, 0) / ts.length;
+  const cy = ts.reduce((s, t) => s + t.y, 0) / ts.length;
+  const idx = new Map();
+  ids.forEach((id, i) => idx.set(id, i));
+  const specs = ts.map(t => ({
+    dx: t.x - cx, dy: t.y - cy,
+    rank: t.rank, dims: t.dims.slice(), legAngles: t.legAngles.slice(),
+    color: t.color.slice(), data: t.data.slice(),
+    dataIm: t.dataIm ? t.dataIm.slice() : null,
+  }));
+  const cbonds = [];
+  for (const b of bonds) {
+    if (idx.has(b.a) && idx.has(b.b)) {
+      cbonds.push({ a: idx.get(b.a), ai: b.ai, b: idx.get(b.b), bi: b.bi });
+    }
+  }
+  clipboard = { specs, bonds: cbonds };
+  toast('Copied ' + ids.length + ' tensor' + (ids.length === 1 ? '' : 's'));
+}
+function pasteClipboard() {
+  if (!clipboard) { toast('Clipboard is empty', true); return; }
+  const w = screenToWorld(mouse.x, mouse.y);
+  const created = clipboard.specs.map(spec => {
+    const t = {
+      id: nextId++, x: w.x + spec.dx, y: w.y + spec.dy,
+      rank: spec.rank, dims: spec.dims.slice(), legAngles: spec.legAngles.slice(),
+      color: spec.color.slice(), data: spec.data.slice(),
+      dataIm: spec.dataIm ? spec.dataIm.slice() : null,
+      label: 'T' + (nextLabel++),
+    };
+    tensors.push(t);
+    return t;
+  });
+  for (const cb of clipboard.bonds) {
+    bonds.push({ id: nextBondId++, a: created[cb.a].id, ai: cb.ai, b: created[cb.b].id, bi: cb.bi });
+  }
+  selection = new Set(created.map(t => t.id));
+  updateInfo();
+  toast('Pasted ' + created.length + ' tensor' + (created.length === 1 ? '' : 's'));
+}
+function placeTensor(spec, x, y) {
+  const t = {
+    id: nextId++, x, y, rank: spec.rank, dims: spec.dims.slice(),
+    legAngles: spec.legAngles.slice(), color: spec.color.slice(),
+    data: spec.data.slice(), dataIm: spec.dataIm ? spec.dataIm.slice() : null,
+    label: 'T' + (nextLabel++),
+  };
+  tensors.push(t);
+  return t;
+}
+function linkTensors(a, b) {
+  if (!a || !b) return false;
+  if (a.id === b.id) { toast('Cannot link a tensor to itself', true); return false; }
+  const ai = bestFreeLegToward(a, b.x, b.y);
+  const bi = bestFreeLegToward(b, a.x, a.y);
+  if (ai === -1 || bi === -1) {
+    toast('No free leg on ' + (ai === -1 ? a.label : b.label), true);
+    return false;
+  }
+  bonds.push({ id: nextBondId++, a: a.id, ai, b: b.id, bi });
+  return true;
+}
+function connectLegs(A, ai, B, bi) {
+  if (A.id === B.id) { toast('Cannot connect a tensor to itself', true); return false; }
+  if (A.dims[ai] !== B.dims[bi]) {
+    toast('Leg dims differ: ' + A.dims[ai] + ' vs ' + B.dims[bi], true);
+    return false;
+  }
+  const ua = usedLegSet(A.id), ub = usedLegSet(B.id);
+  if (ua.has(ai) || ub.has(bi)) { toast('That leg is already connected', true); return false; }
+  bonds.push({ id: nextBondId++, a: A.id, ai, b: B.id, bi });
+  return true;
+}
+function segmentsIntersect(p1, p2, p3, p4) {
+  const cross = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+  const d1 = cross(p3, p4, p1), d2 = cross(p3, p4, p2);
+  const d3 = cross(p1, p2, p3), d4 = cross(p1, p2, p4);
+  return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+         ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+}
+function bondsCrossedBy(path) {
+  const hit = [];
+  for (const b of bonds) {
+    const A = getTensor(b.a), B = getTensor(b.b);
+    if (!A || !B) continue;
+    for (let i = 0; i + 1 < path.length; i++) {
+      if (segmentsIntersect(path[i], path[i + 1], A, B)) { hit.push(b); break; }
+    }
+  }
+  return hit;
+}
+function cutBond(b) {
+  const A = getTensor(b.a), B = getTensor(b.b);
+  if (A && B) {
+    A.legAngles[b.ai] = Math.atan2(B.y - A.y, B.x - A.x);
+    B.legAngles[b.bi] = Math.atan2(A.y - B.y, A.x - B.x);
+  }
+  bonds = bonds.filter(x => x.id !== b.id);
+}
+function deleteTensors(ids) {
+  const set = new Set(ids);
+  for (const id of ids) {
+    const t = getTensor(id);
+    if (t && t.absId != null) dissolveAbstraction(t.absId);
+  }
+  tensors = tensors.filter(t => !set.has(t.id));
+  bonds = bonds.filter(b => !set.has(b.a) && !set.has(b.b));
+  for (const id of ids) selection.delete(id);
+}
+/* ===================== Contraction engine ===================== */
+function strides(dims) {
+  const s = new Array(dims.length);
+  let acc = 1;
+  for (let i = dims.length - 1; i >= 0; i--) { s[i] = acc; acc *= dims[i]; }
+  return s;
+}
+
+// Contract two working tensors {labels[], dims[], data}: sum shared labels,
+// outer-product the rest. Throws if the result would exceed MAX_TENSOR_SIZE.
+function contractTwo(A, B) {
+  const shared = [], aShared = new Set(), bShared = new Set();
+  for (let ai = 0; ai < A.labels.length; ai++) {
+    const bi = B.labels.indexOf(A.labels[ai]);
+    if (bi !== -1) { shared.push({ ai, bi }); aShared.add(ai); bShared.add(bi); }
+  }
+  const freeA = [], freeB = [];
+  for (let i = 0; i < A.labels.length; i++) if (!aShared.has(i)) freeA.push(i);
+  for (let i = 0; i < B.labels.length; i++) if (!bShared.has(i)) freeB.push(i);
+
+  const resLabels = [], resDims = [];
+  for (const i of freeA) { resLabels.push(A.labels[i]); resDims.push(A.dims[i]); }
+  for (const i of freeB) { resLabels.push(B.labels[i]); resDims.push(B.dims[i]); }
+
+  const resSize = product(resDims);
+  if (resSize > MAX_TENSOR_SIZE)
+    throw new Error('result tensor too large (' + resSize.toLocaleString() + ' elements)');
+
+  const aStr = strides(A.dims), bStr = strides(B.dims);
+  const sharedDims = shared.map(s => A.dims[s.ai]);
+  const sharedSize = product(sharedDims);
+  const cplx = !!(A.dataIm || B.dataIm);
+  const data = makeReal(resSize);
+  const dataIm = cplx ? makeReal(resSize) : null;
+  const resCount = new Array(resDims.length).fill(0);
+  const nFreeA = freeA.length;
+
+  for (let r = 0; r < resSize; r++) {
+    let baseA = 0, baseB = 0;
+    for (let k = 0; k < nFreeA; k++) baseA += resCount[k] * aStr[freeA[k]];
+    for (let k = 0; k < freeB.length; k++) baseB += resCount[nFreeA + k] * bStr[freeB[k]];
+
+    let accRe = 0, accIm = 0;
+    const sc = new Array(shared.length).fill(0);
+    for (let s = 0; s < sharedSize; s++) {
+      let fa = baseA, fb = baseB;
+      for (let k = 0; k < shared.length; k++) {
+        fa += sc[k] * aStr[shared[k].ai];
+        fb += sc[k] * bStr[shared[k].bi];
+      }
+      const ar = A.data[fa], br = B.data[fb];
+      const ai = A.dataIm ? A.dataIm[fa] : 0, bi = B.dataIm ? B.dataIm[fb] : 0;
+      accRe += ar * br - ai * bi;
+      if (cplx) accIm += ar * bi + ai * br;
+      for (let k = shared.length - 1; k >= 0; k--) {
+        if (++sc[k] < sharedDims[k]) break;
+        sc[k] = 0;
+      }
+    }
+    data[r] = accRe;
+    if (cplx) dataIm[r] = accIm;
+    for (let k = resDims.length - 1; k >= 0; k--) {
+      if (++resCount[k] < resDims[k]) break;
+      resCount[k] = 0;
+    }
+  }
+  return { labels: resLabels, dims: resDims, data, dataIm };
+}
+
+// Assign a label to every leg of every selected tensor.
+// Internal bonds share a label (summed away); external bonds & free legs
+// get unique labels that survive as result legs.
+function labelSelection(ids) {
+  const inSet = new Set(ids);
+  const metaByLabel = new Map();
+  const working = [];
+  for (const id of ids) {
+    const t = getTensor(id);
+    const labels = [];
+    for (let i = 0; i < t.rank; i++) {
+      const b = bondAt(t.id, i);
+      let label;
+      if (!b) {
+        label = 'free_' + t.id + '_' + i;
+        if (!metaByLabel.has(label))
+          metaByLabel.set(label, { type: 'free' });
+      } else {
+        const otherId = (b.a === t.id && b.ai === i) ? b.b : b.a;
+        if (inSet.has(otherId)) {
+          label = 'bond_' + b.id;            // internal -> summed
+        } else {
+          label = 'ext_' + b.id;             // external -> result leg
+          if (!metaByLabel.has(label))
+            metaByLabel.set(label, { type: 'bond', bondId: b.id });
+        }
+      }
+      labels.push(label);
+    }
+    working.push({ labels, dims: t.dims.slice(), data: t.data, dataIm: t.dataIm });
+  }
+  return { inSet, metaByLabel, working };
+}
+
+// Quick analysis for the info panel (no heavy math).
+function selectionContractInfo(ids) {
+  const inSet = new Set(ids);
+  const resultDims = [];
+  let internal = 0;
+  for (const id of ids) {
+    const t = getTensor(id);
+    for (let i = 0; i < t.rank; i++) {
+      const b = bondAt(t.id, i);
+      if (!b) { resultDims.push(t.dims[i]); continue; }
+      const otherId = (b.a === t.id && b.ai === i) ? b.b : b.a;
+      if (inSet.has(otherId)) internal++;
+      else resultDims.push(t.dims[i]);
+    }
+  }
+  return { resultRank: resultDims.length, resultDims, internalBonds: internal / 2 };
+}
+
+/* ===================== Tensor-network abstractions ===================== */
+function getAbstraction(id) { return abstractions.find(a => a.id === id); }
+function makeAbstraction(type, sites) {
+  const ab = { id: nextAbsId++, type, name: type + (++absCount[type]),
+               members: sites.map(t => t.id) };
+  for (const t of sites) t.absId = ab.id;
+  abstractions.push(ab);
+  return ab;
+}
+function dissolveAbstraction(absId) {
+  const ab = getAbstraction(absId);
+  if (!ab) return;
+  for (const id of ab.members) { const t = getTensor(id); if (t) delete t.absId; }
+  abstractions = abstractions.filter(a => a.id !== absId);
+}
+function expandAbs(ids) {
+  const out = new Set(ids);
+  for (const id of [...out]) {
+    const t = getTensor(id);
+    if (t && t.absId != null) {
+      const ab = getAbstraction(t.absId);
+      if (ab) for (const m of ab.members) out.add(m);
+    }
+  }
+  return out;
+}
+function abstractionBBox(ab) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const id of ab.members) {
+    const t = getTensor(id);
+    if (!t) continue;
+    const r = radiusOf(t) + LEG_STUB;
+    minX = Math.min(minX, t.x - r); minY = Math.min(minY, t.y - r);
+    maxX = Math.max(maxX, t.x + r); maxY = Math.max(maxY, t.y + r);
+  }
+  if (!isFinite(minX)) return null;
+  const pad = 16;
+  return { x: minX - pad, y: minY - pad, w: maxX - minX + 2 * pad, h: maxY - minY + 2 * pad };
+}
+function drawAbstraction(ab) {
+  const bb = abstractionBBox(ab);
+  if (!bb) return;
+  pillPath(bb.x, bb.y, bb.w, bb.h, 13);
+  ctx.fillStyle = 'rgba(150,162,188,0.06)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(158,170,192,0.5)';
+  ctx.lineWidth = 1.5 / cam.zoom;
+  ctx.setLineDash([6 / cam.zoom, 4 / cam.zoom]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#aab6c8';
+  ctx.font = '600 13px -apple-system, "Segoe UI", sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(ab.name, bb.x + 8, bb.y + 6);
+}
+function buildMPS(N, chi, phys, cx, cy) {
+  const S = 80, x0 = cx - (N - 1) * S / 2, sites = [];
+  for (let i = 0; i < N; i++) {
+    let dims, angles;
+    if (N === 1) { dims = [phys]; angles = [Math.PI / 2]; }
+    else if (i === 0) { dims = [chi, phys]; angles = [0, Math.PI / 2]; }
+    else if (i === N - 1) { dims = [chi, phys]; angles = [Math.PI, Math.PI / 2]; }
+    else { dims = [chi, chi, phys]; angles = [Math.PI, 0, Math.PI / 2]; }
+    const t = makeTensorWithDims(x0 + i * S, cy, dims);
+    t.legAngles = angles;
+    sites.push(t);
+  }
+  for (let i = 0; i < N - 1; i++)
+    bonds.push({ id: nextBondId++, a: sites[i].id, ai: (i === 0 ? 0 : 1), b: sites[i + 1].id, bi: 0 });
+  return sites;
+}
+function buildMPO(N, chi, phys, cx, cy) {
+  const S = 80, x0 = cx - (N - 1) * S / 2, sites = [];
+  for (let i = 0; i < N; i++) {
+    let dims, angles;
+    if (N === 1) { dims = [phys, phys]; angles = [-Math.PI / 2, Math.PI / 2]; }
+    else if (i === 0) { dims = [chi, phys, phys]; angles = [0, -Math.PI / 2, Math.PI / 2]; }
+    else if (i === N - 1) { dims = [chi, phys, phys]; angles = [Math.PI, -Math.PI / 2, Math.PI / 2]; }
+    else { dims = [chi, chi, phys, phys]; angles = [Math.PI, 0, -Math.PI / 2, Math.PI / 2]; }
+    const t = makeTensorWithDims(x0 + i * S, cy, dims);
+    t.legAngles = angles;
+    sites.push(t);
+  }
+  for (let i = 0; i < N - 1; i++)
+    bonds.push({ id: nextBondId++, a: sites[i].id, ai: (i === 0 ? 0 : 1), b: sites[i + 1].id, bi: 0 });
+  return sites;
+}
+function buildPEPS(R, C, chi, phys, cx, cy) {
+  const S = 86, x0 = cx - (C - 1) * S / 2, y0 = cy - (R - 1) * S / 2;
+  const am = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0, phys: -Math.PI / 4 };
+  const grid = [], legmap = [];
+  for (let r = 0; r < R; r++) {
+    grid.push([]); legmap.push([]);
+    for (let c = 0; c < C; c++) {
+      const order = [];
+      if (r > 0) order.push('up');
+      if (r < R - 1) order.push('down');
+      if (c > 0) order.push('left');
+      if (c < C - 1) order.push('right');
+      order.push('phys');
+      const t = makeTensorWithDims(x0 + c * S, y0 + r * S, order.map(o => o === 'phys' ? phys : chi));
+      t.legAngles = order.map(o => am[o]);
+      grid[r].push(t); legmap[r].push(order);
+    }
+  }
+  for (let r = 0; r < R; r++) for (let c = 0; c < C - 1; c++)
+    bonds.push({ id: nextBondId++, a: grid[r][c].id, ai: legmap[r][c].indexOf('right'),
+                 b: grid[r][c + 1].id, bi: legmap[r][c + 1].indexOf('left') });
+  for (let r = 0; r < R - 1; r++) for (let c = 0; c < C; c++)
+    bonds.push({ id: nextBondId++, a: grid[r][c].id, ai: legmap[r][c].indexOf('down'),
+                 b: grid[r + 1][c].id, bi: legmap[r + 1][c].indexOf('up') });
+  const sites = [];
+  for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) sites.push(grid[r][c]);
+  return sites;
+}
+function analyzeMerge(ids) {
+  if (ids.length < 2) return { mpsOk: false, mpoOk: false, order: null };
+  const inSet = new Set(ids);
+  const deg = new Map(), adj = new Map();
+  for (const id of ids) { deg.set(id, 0); adj.set(id, []); }
+  for (const b of bonds) {
+    if (inSet.has(b.a) && inSet.has(b.b)) {
+      deg.set(b.a, deg.get(b.a) + 1);
+      deg.set(b.b, deg.get(b.b) + 1);
+      adj.get(b.a).push(b.b);
+      adj.get(b.b).push(b.a);
+    }
+  }
+  let ends = 0, bad = false;
+  for (const id of ids) {
+    const d = deg.get(id);
+    if (d === 1) ends++;
+    else if (d !== 2) bad = true;
+  }
+  const seen = new Set([ids[0]]), stack = [ids[0]];
+  while (stack.length) {
+    const u = stack.pop();
+    for (const v of adj.get(u)) if (!seen.has(v)) { seen.add(v); stack.push(v); }
+  }
+  const isChain = !bad && ends === 2 && seen.size === ids.length;
+  let mpsOk = isChain, mpoOk = isChain;
+  for (const id of ids) {
+    const free = getTensor(id).rank - deg.get(id);
+    if (free !== 1) mpsOk = false;
+    if (free !== 2) mpoOk = false;
+  }
+  let order = null;
+  if (isChain) {
+    const start = ids.find(id => deg.get(id) === 1);
+    order = [start];
+    const vis = new Set([start]);
+    let cur = start;
+    while (order.length < ids.length) {
+      const nxt = adj.get(cur).find(v => !vis.has(v));
+      if (nxt === undefined) break;
+      vis.add(nxt); order.push(nxt); cur = nxt;
+    }
+    if (order.length !== ids.length) order = null;
+  }
+  return { mpsOk, mpoOk, order };
+}
+function mergeIntoAbstraction(ids, type) {
+  const info = analyzeMerge(ids);
+  const ok = type === 'MPS' ? info.mpsOk : info.mpoOk;
+  if (!ok || !info.order) { toast('Selection is not a valid ' + type + ' chain', true); return; }
+  const sites = info.order.map(getTensor);
+  const inSet = new Set(ids);
+  const cx = sites.reduce((s, t) => s + t.x, 0) / sites.length;
+  const cy = sites.reduce((s, t) => s + t.y, 0) / sites.length;
+  const S = 80, x0 = cx - (sites.length - 1) * S / 2;
+  sites.forEach((t, i) => { t.x = x0 + i * S; t.y = cy; });
+  for (const t of sites) {
+    const free = [];
+    for (let k = 0; k < t.rank; k++) {
+      const b = bondAt(t.id, k);
+      let other = null;
+      if (b) { const o = (b.a === t.id && b.ai === k) ? b.b : b.a; if (inSet.has(o)) other = getTensor(o); }
+      if (other) t.legAngles[k] = Math.atan2(other.y - t.y, other.x - t.x);
+      else free.push(k);
+    }
+    if (type === 'MPS') { for (const k of free) t.legAngles[k] = Math.PI / 2; }
+    else free.forEach((k, j) => { t.legAngles[k] = (j === 0) ? -Math.PI / 2 : Math.PI / 2; });
+  }
+  const ab = makeAbstraction(type, sites);
+  selection = new Set(ab.members);
+  updateInfo();
+  toast('Merged ' + sites.length + ' tensors → ' + ab.name);
+}
+function clampInt(v, lo, hi, def) {
+  let n = parseInt(v, 10);
+  if (isNaN(n)) n = def;
+  return Math.max(lo, Math.min(hi, n));
+}
+function openBuilder(type, sx, sy) {
+  radial = null;
+  const w = screenToWorld(sx, sy);
+  builderState = { type, wx: w.x, wy: w.y };
+  document.getElementById('bdHead').textContent = 'Build ' + type;
+  const isP = type === 'PEPS';
+  document.getElementById('bdRowN').style.display = isP ? 'none' : 'flex';
+  document.getElementById('bdRowRows').style.display = isP ? 'flex' : 'none';
+  document.getElementById('bdRowCols').style.display = isP ? 'flex' : 'none';
+  const pop = document.getElementById('builder');
+  pop.style.left = Math.max(8, Math.min(sx, innerWidth - 252)) + 'px';
+  pop.style.top = Math.max(8, Math.min(sy, innerHeight - 300)) + 'px';
+  pop.classList.add('show');
+}
+function closeBuilder() {
+  builderState = null;
+  document.getElementById('builder').classList.remove('show');
+}
+function builderBuild() {
+  if (!builderState) return;
+  const chi = clampInt(document.getElementById('bdChi').value, 1, 64, 2);
+  const phys = clampInt(document.getElementById('bdPhys').value, 1, 64, 2);
+  const { type, wx, wy } = builderState;
+  let sites;
+  if (type === 'MPS') sites = buildMPS(clampInt(document.getElementById('bdN').value, 1, 40, 5), chi, phys, wx, wy);
+  else if (type === 'MPO') sites = buildMPO(clampInt(document.getElementById('bdN').value, 1, 40, 5), chi, phys, wx, wy);
+  else sites = buildPEPS(clampInt(document.getElementById('bdRows').value, 1, 10, 3),
+                         clampInt(document.getElementById('bdCols').value, 1, 10, 3), chi, phys, wx, wy);
+  const ab = makeAbstraction(type, sites);
+  selection = new Set(ab.members);
+  closeBuilder();
+  updateInfo();
+  toast('Built ' + ab.name + ' — ' + sites.length + ' tensors');
+}
+
+function contractSelection(ids, atX, atY) {
+  if (ids.length < 2) { toast('Select 2 or more tensors to contract', true); return; }
+  for (const id of ids) {
+    const t = getTensor(id);
+    if (t && t.absId != null) dissolveAbstraction(t.absId);
+  }
+  const { inSet, metaByLabel, working } = labelSelection(ids);
+
+  let acc;
+  try {
+    acc = working[0];
+    for (let k = 1; k < working.length; k++) acc = contractTwo(acc, working[k]);
+  } catch (err) {
+    toast('Contraction aborted: ' + err.message, true);
+    return;
+  }
+
+  const S = ids.map(getTensor);
+  const cx = (atX !== undefined) ? atX : S.reduce((s, t) => s + t.x, 0) / S.length;
+  const cy = (atY !== undefined) ? atY : S.reduce((s, t) => s + t.y, 0) / S.length;
+  const newTensor = {
+    id: nextId++, x: cx, y: cy,
+    rank: acc.labels.length, dims: acc.dims.slice(),
+    legAngles: defaultLegAngles(acc.labels.length),
+    color: rankHSL(acc.labels.length).slice(),
+    data: acc.data, dataIm: acc.dataIm, label: 'T' + (nextLabel++),
+  };
+
+  // Rewire external bonds onto the new tensor's legs.
+  acc.labels.forEach((lab, idx) => {
+    const m = metaByLabel.get(lab);
+    if (m && m.type === 'bond') {
+      const bond = bonds.find(b => b.id === m.bondId);
+      if (bond) {
+        if (inSet.has(bond.a)) { bond.a = newTensor.id; bond.ai = idx; }
+        else { bond.b = newTensor.id; bond.bi = idx; }
+      }
+    }
+  });
+
+  bonds = bonds.filter(b => !(inSet.has(b.a) && inSet.has(b.b)));  // drop internal
+  tensors = tensors.filter(t => !inSet.has(t.id));
+  tensors.push(newTensor);
+  selection = new Set([newTensor.id]);
+
+  const r = newTensor.rank;
+  toast('Contracted ' + S.length + ' tensors → rank ' + r +
+        (r === 0 ? '  (scalar = ' + scalarStr(newTensor) + ')' : ''));
+}
+/* ===================== Rendering ===================== */
+function buildUsage() {
+  const m = new Map();
+  for (const t of tensors) m.set(t.id, new Set());
+  for (const b of bonds) {
+    if (m.has(b.a)) m.get(b.a).add(b.ai);
+    if (m.has(b.b)) m.get(b.b).add(b.bi);
+  }
+  return m;
+}
+
+function pillPath(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function drawGrid() {
+  const tl = screenToWorld(0, 0);
+  const br = screenToWorld(canvas.width / DPR, canvas.height / DPR);
+  let step = 42;
+  while (step * cam.zoom < 26) step *= 2;
+  while (step * cam.zoom > 130) step /= 2;
+  const x0 = Math.floor(tl.x / step) * step;
+  const y0 = Math.floor(tl.y / step) * step;
+  const dotR = 1.1 / cam.zoom;
+  ctx.fillStyle = 'rgba(255,255,255,0.022)';
+  for (let x = x0; x <= br.x; x += step)
+    for (let y = y0; y <= br.y; y += step) {
+      ctx.beginPath();
+      ctx.arc(x, y, dotR, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+}
+
+function drawBond(b) {
+  const A = getTensor(b.a), B = getTensor(b.b);
+  if (!A || !B) return;
+  ctx.beginPath();
+  ctx.moveTo(A.x, A.y);
+  ctx.lineTo(B.x, B.y);
+  if (colKey(A.color) === colKey(B.color)) {
+    ctx.strokeStyle = colL(A.color, -4);
+  } else {
+    const g = ctx.createLinearGradient(A.x, A.y, B.x, B.y);
+    g.addColorStop(0, colStr(A.color));
+    g.addColorStop(1, colStr(B.color));
+    ctx.strokeStyle = g;
+  }
+  ctx.lineWidth = 3;
+  ctx.stroke();
+
+  // bond dimension pill at midpoint
+  const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
+  const txt = String(A.dims[b.ai]);
+  ctx.font = F_SMALL;
+  const pw = ctx.measureText(txt).width + 8;
+  pillPath(mx - pw / 2, my - 7, pw, 14, 5);
+  ctx.fillStyle = '#1b2330';
+  ctx.fill();
+  ctx.strokeStyle = '#33405a';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = '#9fb0c8';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(txt, mx, my + 0.5);
+}
+
+function legIsActive(tid, i) {
+  if (drag)
+    return drag.mode === 'leg-rotate' && drag.tensorId === tid && drag.legIndex === i;
+  return !!hoverLeg && hoverLeg.tensorId === tid && hoverLeg.legIndex === i;
+}
+
+function drawFreeLegs(t, used) {
+  const r = radiusOf(t);
+  for (let i = 0; i < t.rank; i++) {
+    if (used.has(i)) continue;
+    const a = legAngle(t, i);
+    const x1 = t.x + Math.cos(a) * r, y1 = t.y + Math.sin(a) * r;
+    const x2 = t.x + Math.cos(a) * (r + LEG_STUB), y2 = t.y + Math.sin(a) * (r + LEG_STUB);
+    const active = legIsActive(t.id, i);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.strokeStyle = active ? '#ffffff' : colL(t.color, -8);
+    ctx.lineWidth = active ? 3 : 2;
+    ctx.stroke();
+    if (active) {
+      ctx.beginPath();
+      ctx.arc(x2, y2, 6, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fill();
+    }
+    ctx.beginPath();
+    ctx.arc(x2, y2, active ? 4 : 2.4, 0, 2 * Math.PI);
+    ctx.fillStyle = active ? '#ffffff' : colL(t.color, 10);
+    ctx.fill();
+  }
+}
+
+function drawTensor(t) {
+  const r = radiusOf(t);
+  const sel = selection.has(t.id);
+  const hov = hoverId === t.id;
+  const cHov = connectHoverId === t.id;
+
+  if (sel || cHov) {
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, r + 7, 0, 2 * Math.PI);
+    ctx.fillStyle = cHov ? 'rgba(124,198,255,0.22)' : 'rgba(255,255,255,0.10)';
+    ctx.fill();
+  }
+
+  const grad = ctx.createRadialGradient(
+    t.x - r * 0.35, t.y - r * 0.35, r * 0.15, t.x, t.y, r);
+  grad.addColorStop(0, colL(t.color, hov || cHov ? 20 : 12));
+  grad.addColorStop(1, colL(t.color, hov || cHov ? 2 : -7));
+  ctx.beginPath();
+  ctx.arc(t.x, t.y, r, 0, 2 * Math.PI);
+  ctx.fillStyle = grad;
+  ctx.fill();
+  ctx.lineWidth = sel ? 3 : 1.5;
+  ctx.strokeStyle = sel ? '#ffffff' : colL(t.color, -24);
+  ctx.stroke();
+
+  if (t.rank === 0) {                       // scalar: inner ring + value
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, r - 5, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(16,20,26,0.45)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#10141a';
+  if (t.rank === 0) {
+    ctx.font = F_MONO;
+    ctx.fillText(fmtNumShort(t.data[0]), t.x, t.y);
+  } else {
+    ctx.font = F_BODY;
+    ctx.fillText(t.label, t.x, t.y);
+  }
+}
+function drawGhost() {
+  const w = screenToWorld(mouse.x, mouse.y);
+  const ghost = {
+    id: -1, x: w.x, y: w.y, rank: placing.rank, dims: placing.dims,
+    legAngles: placing.legAngles, color: placing.color,
+    data: placing.data, label: placing.label || '',
+  };
+  ctx.globalAlpha = 0.5;
+  drawFreeLegs(ghost, new Set());
+  drawTensor(ghost);
+  ctx.globalAlpha = 1;
+}
+
+function drawPendingConnection() {
+  const s = getTensor(drag.sourceId);
+  if (!s) return;
+  const m = screenToWorld(mouse.x, mouse.y);
+  const a = Math.atan2(m.y - s.y, m.x - s.x), r = radiusOf(s);
+  const z = cam.zoom;
+  ctx.beginPath();
+  ctx.moveTo(s.x + Math.cos(a) * r, s.y + Math.sin(a) * r);
+  ctx.lineTo(m.x, m.y);
+  ctx.strokeStyle = '#7cc6ff';
+  ctx.lineWidth = 2.4 / z;
+  ctx.setLineDash([6 / z, 5 / z]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.beginPath();
+  ctx.arc(m.x, m.y, 4 / z, 0, 2 * Math.PI);
+  ctx.fillStyle = '#7cc6ff';
+  ctx.fill();
+}
+
+function drawBox() {
+  const m = screenToWorld(mouse.x, mouse.y);
+  const x = Math.min(drag.bx0, m.x), y = Math.min(drag.by0, m.y);
+  const w = Math.abs(m.x - drag.bx0), h = Math.abs(m.y - drag.by0);
+  ctx.fillStyle = 'rgba(124,198,255,0.08)';
+  ctx.strokeStyle = 'rgba(124,198,255,0.55)';
+  ctx.lineWidth = 1 / cam.zoom;
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeRect(x, y, w, h);
+}
+function drawCutPath() {
+  const w = screenToWorld(mouse.x, mouse.y);
+  ctx.beginPath();
+  ctx.moveTo(drag.path[0].x, drag.path[0].y);
+  for (let i = 1; i < drag.path.length; i++) ctx.lineTo(drag.path[i].x, drag.path[i].y);
+  ctx.lineTo(w.x, w.y);
+  ctx.strokeStyle = '#ff5a52';
+  ctx.lineWidth = 2.5 / cam.zoom;
+  ctx.setLineDash([7 / cam.zoom, 5 / cam.zoom]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function sectorPath(cx, cy, r0, r1, a0, a1) {
+  ctx.beginPath();
+  ctx.arc(cx, cy, r1, a0, a1, false);
+  ctx.arc(cx, cy, r0, a1, a0, true);
+  ctx.closePath();
+}
+function drawRadialRing(items, ring, hover) {
+  const { r0, r1 } = ringRadii(ring);
+  const midR = (r0 + r1) / 2;
+  const pad = 2 / r1;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    const s = sectorOf(items.length, i);
+    const mid = (s.a0 + s.a1) / 2;
+    const hov = hover && hover.ring === ring && hover.index === i;
+    sectorPath(radial.cx, radial.cy, r0, r1, s.a0 + pad, s.a1 - pad);
+    if (it.disabled) ctx.fillStyle = 'rgba(70,78,92,0.55)';
+    else ctx.fillStyle = hov ? colL(it.color, 14) : colStr(it.color);
+    ctx.fill();
+    ctx.lineWidth = hov && !it.disabled ? 2.5 : 1;
+    ctx.strokeStyle = hov && !it.disabled ? '#ffffff' : 'rgba(0,0,0,0.4)';
+    ctx.stroke();
+    const lx = radial.cx + Math.cos(mid) * midR;
+    const ly = radial.cy + Math.sin(mid) * midR;
+    ctx.fillStyle = it.disabled ? '#8893a5' : '#10141a';
+    ctx.font = F_BODY;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(it.label, lx, ly);
+    if (it.children) {
+      const cr = r1 - 8;
+      ctx.fillStyle = it.disabled ? '#8893a5' : 'rgba(16,20,26,0.75)';
+      ctx.beginPath();
+      ctx.moveTo(radial.cx + Math.cos(mid) * cr, radial.cy + Math.sin(mid) * cr);
+      ctx.lineTo(radial.cx + Math.cos(mid - 0.09) * (cr - 6), radial.cy + Math.sin(mid - 0.09) * (cr - 6));
+      ctx.lineTo(radial.cx + Math.cos(mid + 0.09) * (cr - 6), radial.cy + Math.sin(mid + 0.09) * (cr - 6));
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+}
+function drawRadial() {
+  const hover = radialHitTest(mouse.x, mouse.y);
+  drawRadialRing(radial.items, 0, hover);
+  if (radial.openIndex >= 0 && radial.items[radial.openIndex].children)
+    drawRadialRing(radial.items[radial.openIndex].children, 1, hover);
+  ctx.beginPath();
+  ctx.arc(radial.cx, radial.cy, HUB_R, 0, 2 * Math.PI);
+  ctx.fillStyle = 'rgba(22,27,35,0.96)';
+  ctx.fill();
+  ctx.strokeStyle = '#3a4456';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+}
+
+function render() {
+  const w = canvas.width / DPR, h = canvas.height / DPR;
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  // world layer: device = DPR * (world * zoom + cam)
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.transform(cam.zoom, 0, 0, cam.zoom, cam.x, cam.y);
+  drawGrid();
+  for (const ab of abstractions) drawAbstraction(ab);
+  const usage = buildUsage();
+  for (const b of bonds) drawBond(b);
+  for (const t of tensors) drawFreeLegs(t, usage.get(t.id));
+  for (const t of tensors) drawTensor(t);
+  if (placing) drawGhost();
+  if (drag && drag.mode === 'connect') drawPendingConnection();
+  if (drag && drag.mode === 'box') drawBox();
+  if (drag && drag.mode === 'cut') drawCutPath();
+
+  // screen layer: UI overlays, unaffected by the camera
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  if (radial) drawRadial();
+
+  requestAnimationFrame(render);
+}
+/* ===================== Radial menus ===================== */
+function buildRadial(x, y, items) {
+  return { cx: x, cy: y, items, openIndex: -1 };
+}
+function ringRadii(ring) {
+  const r0 = HUB_R + ring * (RING_W + RING_GAP);
+  return { r0, r1: r0 + RING_W };
+}
+function sectorOf(count, i) {
+  const step = 2 * Math.PI / count;
+  return { a0: -Math.PI / 2 + i * step, a1: -Math.PI / 2 + (i + 1) * step };
+}
+function hitRing(count, ring, d, ang) {
+  const { r0, r1 } = ringRadii(ring);
+  if (d < r0 || d > r1) return -1;
+  let a = ang;
+  while (a < -Math.PI / 2) a += 2 * Math.PI;
+  while (a >= -Math.PI / 2 + 2 * Math.PI) a -= 2 * Math.PI;
+  const idx = Math.floor((a + Math.PI / 2) / (2 * Math.PI / count));
+  return (idx >= 0 && idx < count) ? idx : -1;
+}
+function radialHitTest(x, y) {
+  if (!radial) return null;
+  const dx = x - radial.cx, dy = y - radial.cy;
+  const d = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
+  if (radial.openIndex >= 0) {
+    const kids = radial.items[radial.openIndex].children;
+    if (kids) {
+      const i = hitRing(kids.length, 1, d, ang);
+      if (i !== -1) return { ring: 1, index: i, item: kids[i] };
+    }
+  }
+  const i0 = hitRing(radial.items.length, 0, d, ang);
+  if (i0 !== -1) return { ring: 0, index: i0, item: radial.items[i0] };
+  return null;
+}
+function openSplitPopup(sx, sy, tid) {
+  const t = getTensor(tid);
+  if (!t) return;
+  radial = null;
+  const sideA = new Set();
+  const half = Math.ceil(t.rank / 2);
+  for (let i = 0; i < t.rank; i++) if (i < half) sideA.add(i);
+  splitState = { tid, sideA };
+  document.getElementById('spHead').textContent = 'Split ' + t.label + ' — rank ' + t.rank;
+  const pop = document.getElementById('splitPopup');
+  pop.style.left = Math.max(8, Math.min(sx, innerWidth - 252)) + 'px';
+  pop.style.top = Math.max(8, Math.min(sy, innerHeight - 240)) + 'px';
+  pop.classList.add('show');
+  renderSplitLegs();
+}
+function renderSplitLegs() {
+  const t = getTensor(splitState.tid);
+  const host = document.getElementById('spLegs');
+  host.innerHTML = '';
+  for (let i = 0; i < t.rank; i++) {
+    const chip = document.createElement('div');
+    chip.className = 'sp-leg ' + (splitState.sideA.has(i) ? 'sideA' : 'sideB');
+    chip.textContent = 'leg ' + i;
+    const idx = i;
+    chip.onclick = () => {
+      if (splitState.sideA.has(idx)) splitState.sideA.delete(idx);
+      else splitState.sideA.add(idx);
+      renderSplitLegs();
+    };
+    host.appendChild(chip);
+  }
+}
+function closeSplitPopup() {
+  splitState = null;
+  document.getElementById('splitPopup').classList.remove('show');
+}
+function performSplit() {
+  if (!splitState) return;
+  const t = getTensor(splitState.tid);
+  if (!t) { closeSplitPopup(); return; }
+  const legsA = [], legsB = [];
+  for (let i = 0; i < t.rank; i++) (splitState.sideA.has(i) ? legsA : legsB).push(i);
+  if (legsA.length === 0 || legsB.length === 0) {
+    toast('Each factor needs at least one leg', true);
+    return;
+  }
+  let bd = parseInt(document.getElementById('spBond').value, 10);
+  if (isNaN(bd) || bd < 1) bd = 1;
+  const method = document.getElementById('spMethod').value;
+  const dimsA = legsA.map(i => t.dims[i]); dimsA.push(bd);
+  const dimsB = legsB.map(i => t.dims[i]); dimsB.push(bd);
+  const A = makeTensorWithDims(t.x - 60, t.y, dimsA);
+  const B = makeTensorWithDims(t.x + 60, t.y, dimsB);
+  for (const bo of bonds) {
+    if (bo.a === t.id) {
+      if (splitState.sideA.has(bo.ai)) { bo.a = A.id; bo.ai = legsA.indexOf(bo.ai); }
+      else { bo.a = B.id; bo.ai = legsB.indexOf(bo.ai); }
+    }
+    if (bo.b === t.id) {
+      if (splitState.sideA.has(bo.bi)) { bo.b = A.id; bo.bi = legsA.indexOf(bo.bi); }
+      else { bo.b = B.id; bo.bi = legsB.indexOf(bo.bi); }
+    }
+  }
+  bonds.push({ id: nextBondId++, a: A.id, ai: A.rank - 1, b: B.id, bi: B.rank - 1 });
+  const lbl = t.label;
+  if (t.absId != null) dissolveAbstraction(t.absId);
+  tensors = tensors.filter(x => x.id !== t.id);
+  selection = new Set([A.id, B.id]);
+  closeSplitPopup();
+  updateInfo();
+  toast(method + ' split ' + lbl + ' → ' + A.label + ' + ' + B.label);
+}
+function openAddRadial(x, y) {
+  const items = [0, 1, 2, 3, 4].map(r => ({
+    label: 'R' + r, color: rankHSL(r).slice(),
+    action: () => {
+      const w = screenToWorld(x, y);
+      const t = addTensor(w.x, w.y, r);
+      selection = new Set([t.id]);
+      updateInfo();
+      toast('Added rank-' + r + ' tensor');
+    },
+  }));
+  if (selection.size === 0) {
+    items.push({
+      label: 'Spawn', color: [150, 48, 60],
+      children: [
+        { label: 'MPS', color: [210, 60, 60], action: () => openBuilder('MPS', x, y) },
+        { label: 'MPO', color: [30, 74, 58], action: () => openBuilder('MPO', x, y) },
+        { label: 'PEPS', color: [270, 50, 66], action: () => openBuilder('PEPS', x, y) },
+      ],
+    });
+  }
+  if (selection.size >= 2) {
+    const ids = [...selection];
+    items.push({
+      label: 'Contract', color: [280, 55, 64],
+      action: () => {
+        const w = screenToWorld(x, y);
+        contractSelection(ids, w.x, w.y);
+        updateInfo();
+      },
+    });
+    const mi = analyzeMerge(ids);
+    items.push({
+      label: 'Merge', color: [200, 46, 58],
+      children: [
+        { label: 'MPS', color: [210, 60, 60], disabled: !mi.mpsOk,
+          action: () => mergeIntoAbstraction(ids, 'MPS') },
+        { label: 'MPO', color: [30, 74, 58], disabled: !mi.mpoOk,
+          action: () => mergeIntoAbstraction(ids, 'MPO') },
+      ],
+    });
+  }
+  radial = buildRadial(x, y, items);
+}
+function openTensorRadial(x, y, tid) {
+  const t = getTensor(tid);
+  if (!t) return;
+  selection = new Set([tid]);
+  updateInfo();
+  const items = [
+    { label: 'Del', color: [344, 58, 60], action: () => {
+        deleteTensors([tid]); updateInfo(); toast('Deleted ' + t.label); } },
+    { label: 'Roll', color: [210, 60, 60], action: () => {
+        rerollData(t); toast('Re-rolled data for ' + t.label); } },
+    { label: '+Leg', color: [186, 54, 52], action: () => {
+        addLeg(t); updateInfo();
+        toast('Added a leg to ' + t.label + ' — now rank ' + t.rank); } },
+    { label: 'Copy', color: [145, 46, 54], action: () => {
+        placing = { rank: t.rank, dims: t.dims.slice(), legAngles: t.legAngles.slice(),
+                    color: t.color.slice(), data: t.data.slice(),
+                    dataIm: t.dataIm ? t.dataIm.slice() : null, label: t.label };
+        toast('Click to place the copy  ·  Esc or right-click to cancel'); } },
+    { label: 'Split', color: [270, 50, 66], action: () => openSplitPopup(x, y, tid) },
+  ];
+  if (t.absId != null) {
+    items.push({ label: 'Ungroup', color: [200, 46, 58], action: () => {
+      const ab = getAbstraction(t.absId);
+      dissolveAbstraction(t.absId);
+      toast('Dissolved ' + (ab ? ab.name : 'abstraction'));
+    } });
+  }
+  radial = buildRadial(x, y, items);
+}
+
+/* ===================== Mouse input ===================== */
+function onMouseDown(e) {
+  const sx = e.clientX, sy = e.clientY;
+  mouse.x = sx; mouse.y = sy;
+
+  if (splitState) { closeSplitPopup(); return; }
+  if (builderState) { closeBuilder(); return; }
+
+  if (radial) {                                  // a menu is open
+    const hit = radialHitTest(sx, sy);
+    if (hit && !hit.item.disabled) {
+      if (hit.item.children && hit.ring === 0) {
+        radial.openIndex = (radial.openIndex === hit.index) ? -1 : hit.index;
+      } else if (hit.item.action) {
+        const act = hit.item.action;
+        radial = null;
+        act();
+      }
+    } else if (!hit) {
+      radial = null;
+    }
+    e.preventDefault();
+    return;
+  }
+
+  if (placing) {
+    if (e.button === 0) {
+      const wp = screenToWorld(sx, sy);
+      const t = placeTensor(placing, wp.x, wp.y);
+      selection = new Set([t.id]);
+      updateInfo();
+      toast('Placed ' + t.label);
+      placing = null;
+    } else {
+      placing = null;
+      toast('Copy cancelled');
+    }
+    e.preventDefault();
+    return;
+  }
+
+  if (e.button === 1) {                          // middle button: pan the camera
+    drag = { mode: 'pan', x0: sx, y0: sy, camX0: cam.x, camY0: cam.y, moved: false };
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
+    return;
+  }
+
+  const w = screenToWorld(sx, sy);
+
+  if (e.button === 2) {                          // right button
+    if (e.ctrlKey) {                             // Ctrl+right-drag: cut bonds
+      drag = { mode: 'cut', path: [w], x0: sx, y0: sy, moved: false };
+      canvas.style.cursor = 'crosshair';
+      e.preventDefault();
+      return;
+    }
+    const t = tensorAt(w.x, w.y);
+    drag = {
+      mode: t ? 'right-pending-tensor' : 'right-pending-empty',
+      x0: sx, y0: sy, sourceId: t ? t.id : null, moved: false,
+    };
+    e.preventDefault();
+    return;
+  }
+
+  if (e.button === 0) {                          // left button
+    const legHit = freeLegTipAt(w.x, w.y);
+    if (legHit) {
+      drag = { mode: 'leg-rotate', x0: sx, y0: sy,
+               tensorId: legHit.tensor.id, legIndex: legHit.legIndex, moved: false };
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+    const t = tensorAt(w.x, w.y);
+    if (t) {
+      if (e.shiftKey) {
+        if (selection.has(t.id)) selection.delete(t.id);
+        else selection.add(t.id);
+      } else if (!selection.has(t.id)) {
+        selection = new Set([t.id]);
+      }
+      selection = expandAbs(selection);
+      const moving = [...selection].map(id => {
+        const tt = getTensor(id);
+        return { id, dx: tt.x - w.x, dy: tt.y - w.y };
+      });
+      drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+    } else {
+      if (!e.shiftKey) selection = new Set();
+      drag = { mode: 'box', x0: sx, y0: sy, bx0: w.x, by0: w.y,
+               additive: e.shiftKey, base: new Set(selection) };
+    }
+    updateInfo();
+  }
+}
+
+function onMouseMove(e) {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+
+  if (placing) { canvas.style.cursor = 'copy'; return; }
+
+  if (!drag) {
+    const w = screenToWorld(mouse.x, mouse.y);
+    const legHit = freeLegTipAt(w.x, w.y);
+    hoverLeg = legHit ? { tensorId: legHit.tensor.id, legIndex: legHit.legIndex } : null;
+    const t = legHit ? null : tensorAt(w.x, w.y);
+    hoverId = t ? t.id : null;
+    canvas.style.cursor = (legHit || t) ? 'grab' : 'default';
+    return;
+  }
+
+  if (Math.hypot(mouse.x - drag.x0, mouse.y - drag.y0) > MOVE_THRESH) drag.moved = true;
+
+  if (drag.mode === 'pan') {
+    cam.x = drag.camX0 + (mouse.x - drag.x0);
+    cam.y = drag.camY0 + (mouse.y - drag.y0);
+    return;
+  }
+
+  if (drag.mode === 'cut') {
+    const w = screenToWorld(mouse.x, mouse.y);
+    const last = drag.path[drag.path.length - 1];
+    if ((w.x - last.x) ** 2 + (w.y - last.y) ** 2 > 9) drag.path.push(w);
+    return;
+  }
+
+  if (drag.mode === 'leg-rotate') {
+    const t = getTensor(drag.tensorId);
+    if (t) {
+      const w = screenToWorld(mouse.x, mouse.y);
+      t.legAngles[drag.legIndex] = Math.atan2(w.y - t.y, w.x - t.x);
+      const tip = freeLegTipAt(w.x, w.y);
+      const over = tip ? tip.tensor : tensorAt(w.x, w.y);
+      connectHoverId = (over && over.id !== t.id) ? over.id : null;
+    }
+    return;
+  }
+
+  if (drag.mode === 'move') {
+    canvas.style.cursor = 'grabbing';
+    const w = screenToWorld(mouse.x, mouse.y);
+    for (const m of drag.moving) {
+      const t = getTensor(m.id);
+      t.x = w.x + m.dx;
+      t.y = w.y + m.dy;
+    }
+  } else if (drag.mode === 'right-pending-tensor' && drag.moved) {
+    drag.mode = 'connect';
+  }
+
+  if (drag.mode === 'connect') {
+    const w = screenToWorld(mouse.x, mouse.y);
+    const t = tensorAt(w.x, w.y);
+    connectHoverId = (t && t.id !== drag.sourceId) ? t.id : null;
+  }
+}
+
+function onMouseUp(e) {
+  if (!drag) return;
+  const sx = e.clientX, sy = e.clientY;
+  const w = screenToWorld(sx, sy);
+
+  if (drag.mode === 'cut') {
+    const cw = screenToWorld(sx, sy);
+    drag.path.push(cw);
+    const cut = bondsCrossedBy(drag.path);
+    for (const b of cut) cutBond(b);
+    if (cut.length) {
+      toast('Cut ' + cut.length + ' connection' + (cut.length === 1 ? '' : 's'));
+      updateInfo();
+    }
+  } else if (drag.mode === 'leg-rotate') {
+    const src = getTensor(drag.tensorId);
+    const tip = freeLegTipAt(w.x, w.y);
+    const target = tip ? tip.tensor : tensorAt(w.x, w.y);
+    if (src && target && target.id !== src.id) {
+      const ti = tip ? tip.legIndex : bestFreeLegToward(target, src.x, src.y);
+      if (ti !== -1 && connectLegs(src, drag.legIndex, target, ti)) {
+        toast('Connected ' + src.label + ' ↔ ' + target.label);
+        updateInfo();
+      }
+    }
+  } else if (drag.mode === 'connect') {
+    const t = tensorAt(w.x, w.y);
+    if (t && t.id !== drag.sourceId) {
+      if (linkTensors(getTensor(drag.sourceId), t)) {
+        toast('Connected ' + getTensor(drag.sourceId).label + ' ↔ ' + t.label);
+        updateInfo();
+      }
+    }
+  } else if (drag.mode === 'right-pending-tensor') {
+    openTensorRadial(sx, sy, drag.sourceId);
+  } else if (drag.mode === 'right-pending-empty') {
+    if (!drag.moved) openAddRadial(sx, sy);
+  } else if (drag.mode === 'box' && drag.moved) {
+    const x0 = Math.min(drag.bx0, w.x), y0 = Math.min(drag.by0, w.y);
+    const x1 = Math.max(drag.bx0, w.x), y1 = Math.max(drag.by0, w.y);
+    const sel = drag.additive ? drag.base : new Set();
+    for (const t of tensors)
+      if (t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1) sel.add(t.id);
+    selection = sel;
+    updateInfo();
+  }
+
+  connectHoverId = null;
+  drag = null;
+  canvas.style.cursor = 'default';
+}
+
+function onWheel(e) {
+  e.preventDefault();
+  const before = screenToWorld(e.clientX, e.clientY);
+  const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+  cam.zoom = clamp(cam.zoom * factor, 0.15, 6);
+  cam.x = e.clientX - before.x * cam.zoom;   // keep cursor over the same world point
+  cam.y = e.clientY - before.y * cam.zoom;
+}
+
+/* ===================== Keyboard input ===================== */
+function onKeyDown(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+  if (e.ctrlKey || e.metaKey) {
+    if (e.code === 'KeyC') { e.preventDefault(); copySelection(); }
+    else if (e.code === 'KeyV') { e.preventDefault(); pasteClipboard(); }
+    return;
+  }
+
+  if (e.code === 'Space') {
+    e.preventDefault();
+    const ids = [...selection];
+    if (ids.length !== 2) { toast('Select exactly 2 tensors to link', true); return; }
+    const a = getTensor(ids[0]), b = getTensor(ids[1]);
+    if (linkTensors(a, b)) { toast('Linked ' + a.label + ' ↔ ' + b.label); updateInfo(); }
+  } else if (e.code === 'KeyA') {
+    contractSelection([...selection]);
+    updateInfo();
+  } else if (e.code === 'Delete' || e.code === 'Backspace') {
+    e.preventDefault();
+    if (selection.size) {
+      const n = selection.size;
+      deleteTensors([...selection]);
+      updateInfo();
+      toast('Deleted ' + n + ' tensor' + (n === 1 ? '' : 's'));
+    }
+  } else if (e.code === 'KeyS') {
+    if (selection.size === 1) openSplitPopup(mouse.x, mouse.y, [...selection][0]);
+    else toast('Select exactly one tensor to split', true);
+  } else if (e.code === 'Escape') {
+    radial = null; drag = null; connectHoverId = null;
+    if (placing) { placing = null; toast('Copy cancelled'); }
+    if (splitState) closeSplitPopup();
+    if (builderState) closeBuilder();
+  }
+}
+
+/* ===================== Info panel ===================== */
+function updateInfo() {
+  const ids = [...selection];
+  if (ids.length === 0) {
+    infoBody.innerHTML =
+      '<div class="empty">No tensors selected.</div>' +
+      '<div class="stat-row" style="margin-top:8px"><span>Tensors in network</span>' +
+      '<span class="val">' + tensors.length + '</span></div>';
+    return;
+  }
+
+  let totalFloats = 0, totalMem = 0, rows = '';
+  for (const id of ids) {
+    const t = getTensor(id);
+    totalFloats += floatsOf(t);
+    totalMem += memOf(t);
+    rows +=
+      '<div class="sel-item"><span class="dot" style="background:' + colStr(t.color) + '"></span>' +
+      '<span>' + t.label + '</span>' +
+      '<span class="meta">rank ' + t.rank + ' · ' + fmtBytes(memOf(t)) + '</span></div>';
+  }
+
+  let html = '';
+  html += '<div class="stat-row"><span>Selected</span><span class="val">' +
+          ids.length + ' / ' + tensors.length + '</span></div>';
+  html += '<div class="stat-row"><span>Total floats</span><span class="val">' +
+          fmtCount(totalFloats) + '</span></div>';
+  html += '<div class="stat-row"><span>Total memory</span><span class="val">' +
+          fmtBytes(totalMem) + '</span></div>';
+
+  if (ids.length === 1) {
+    const t = getTensor(ids[0]);
+    html += '<div class="stat-row"><span>Shape</span><span class="val">[' +
+            t.dims.join(', ') + ']</span></div>';
+    html += '<div class="stat-row"><span>Free legs</span><span class="val">' +
+            freeLegCount(t) + ' / ' + t.rank + '</span></div>';
+    if (t.rank === 0)
+      html += '<div class="stat-row"><span>Value</span><span class="val">' +
+              scalarStr(t) + '</span></div>';
+  }
+
+  html += '<div class="sel-list">' + rows + '</div>';
+
+  if (ids.length >= 2) {
+    const ci = selectionContractInfo(ids);
+    const size = product(ci.resultDims);
+    let hint = 'Press <b>A</b> to contract → rank <b>' + ci.resultRank + '</b>' +
+               (ci.resultRank === 0 ? ' (scalar)' : '');
+    hint += '<br>' + ci.internalBonds + ' internal bond' +
+            (ci.internalBonds === 1 ? '' : 's') + ' summed · result ≈ ' +
+            fmtBytes(size * (cfg.complex ? 2 : 1) * bytesPerFloat());
+    if (size > MAX_TENSOR_SIZE)
+      hint += ' <span style="color:#f0b4ac">— too large</span>';
+    if (ids.length === 2)
+      hint += '<br>Press <b>Space</b> to link these two';
+    html += '<div class="contract-hint">' + hint + '</div>';
+  }
+
+  infoBody.innerHTML = html;
+}
+
+function initLegend() {
+  const grid = document.getElementById('legendGrid');
+  const labels = ['0 scalar', '1 vector', '2 matrix', '3', '4', '5', '6+'];
+  for (let r = 0; r < 7; r++) {
+    const d = document.createElement('div');
+    d.className = 'legend-item';
+    d.innerHTML = '<span class="dot" style="background:' + rankColor(r) +
+                  '"></span><span>' + labels[r] + '</span>';
+    grid.appendChild(d);
+  }
+}
+
+/* ===================== Init ===================== */
+function resize() {
+  DPR = window.devicePixelRatio || 1;
+  canvas.width = Math.floor(innerWidth * DPR);
+  canvas.height = Math.floor(innerHeight * DPR);
+  canvas.style.width = innerWidth + 'px';
+  canvas.style.height = innerHeight + 'px';
+}
+
+function init() {
+  resize();
+  initLegend();
+
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  const a = addTensor(cx - 95, cy + 10, 3);
+  const b = addTensor(cx + 95, cy + 10, 3);
+  const c = addTensor(cx, cy - 120, 2);
+  linkTensors(a, b);
+  linkTensors(a, c);
+  updateInfo();
+
+  canvas.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mousemove', onMouseMove);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('keydown', onKeyDown);
+  canvas.addEventListener('contextmenu', e => e.preventDefault());
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+  window.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+  window.addEventListener('resize', resize);
+  dimInput.addEventListener('change', () => {
+    let v = parseInt(dimInput.value, 10);
+    if (isNaN(v) || v < 1) v = 1;
+    if (v > 64) v = 64;
+    dimInput.value = v;
+    defaultDim = v;
+    toast('Default bond dim = ' + v + ' (applies to new tensors)');
+  });
+  document.getElementById('typeSel').addEventListener('change', e => {
+    cfg.complex = e.target.value === 'complex';
+    for (const t of tensors) rerollData(t);
+    updateInfo();
+    toast('Number type: ' + (cfg.complex ? 'Complex' : 'Real'));
+  });
+  document.getElementById('precSel').addEventListener('change', e => {
+    cfg.prec = e.target.value;
+    for (const t of tensors) rerollData(t);
+    updateInfo();
+    toast('Precision: ' + cfg.prec);
+  });
+  document.getElementById('spDo').addEventListener('click', performSplit);
+  document.getElementById('spCancel').addEventListener('click', closeSplitPopup);
+  document.getElementById('bdDo').addEventListener('click', builderBuild);
+  document.getElementById('bdCancel').addEventListener('click', closeBuilder);
+
+  requestAnimationFrame(render);
+}
+
+init();
+</script>
+</body>
+</html>
