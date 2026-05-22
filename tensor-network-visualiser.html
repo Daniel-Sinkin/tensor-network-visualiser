@@ -199,8 +199,8 @@
   <div class="kb"><span>Link 2 selected</span><kbd>Space</kbd></div>
   <div class="kb"><span>Contract selection</span><kbd>A</kbd></div>
   <div class="kb"><span>Grab / move selection</span><kbd>G</kbd></div>
-  <div class="kb"><span>Copy / paste tensors</span><span>Ctrl C / V</span></div>
-  <div class="kb"><span>Undo</span><span>Ctrl Z</span></div>
+  <div class="kb"><span>Copy / paste tensors</span><span>Cmd C / V</span></div>
+  <div class="kb"><span>Undo</span><span>Cmd Z</span></div>
   <div class="kb"><span>Delete selected</span><kbd>Del</kbd></div>
   <div class="kb"><span>Cancel</span><kbd>Esc</kbd></div>
   <div class="dim-ctl">
@@ -303,6 +303,7 @@ const LEG_STUB = 15;
 const MOVE_THRESH = 5;
 const MAX_TENSOR_SIZE = 1 << 22;          // 4,194,304 elements (~32 MB)
 const HUB_R = 27, RING_W = 58, RING_GAP = 4;
+const RADIAL_GRACE_MS = 200;
 
 const F_BODY  = '600 12px -apple-system, "Segoe UI", Roboto, sans-serif';
 const F_MONO  = '600 10px "SF Mono", Menlo, Consolas, monospace';
@@ -367,6 +368,7 @@ function rankHSL(r) {
 function rankColor(r) { const c = rankHSL(r); return `hsl(${c[0]},${c[1]}%,${c[2]}%)`; }
 function colStr(c) { return `hsl(${c[0]},${c[1]}%,${c[2]}%)`; }
 function colL(c, dl) { return `hsl(${c[0]},${c[1]}%,${clamp(c[2] + dl, 4, 96)}%)`; }
+function colDim(c) { return `hsl(${c[0]},${Math.round(c[1] * 0.4)}%,${Math.round(c[2] * 0.5)}%)`; }
 function colKey(c) { return c[0] + '_' + c[1] + '_' + c[2]; }
 
 function fmtBytes(b) {
@@ -1547,7 +1549,7 @@ function sectorPath(cx, cy, r0, r1, a0, a1) {
   ctx.arc(cx, cy, r0, a1, a0, true);
   ctx.closePath();
 }
-function drawRadialRing(items, ring, hover) {
+function drawRadialRing(items, ring, hover, openIdx) {
   const { r0, r1 } = ringRadii(ring);
   const midR = (r0 + r1) / 2;
   const pad = 2 / r1;
@@ -1556,23 +1558,26 @@ function drawRadialRing(items, ring, hover) {
     const s = sectorOf(items.length, i);
     const mid = (s.a0 + s.a1) / 2;
     const hov = hover && hover.ring === ring && hover.index === i;
+    const marked = (hov || i === openIdx) && !it.disabled;
+    const dim = ring >= 1 && !marked && !it.disabled;
     sectorPath(radial.cx, radial.cy, r0, r1, s.a0 + pad, s.a1 - pad);
     if (it.disabled) ctx.fillStyle = 'rgba(70,78,92,0.55)';
+    else if (dim) ctx.fillStyle = colDim(it.color);
     else ctx.fillStyle = hov ? colL(it.color, 14) : colStr(it.color);
     ctx.fill();
-    ctx.lineWidth = hov && !it.disabled ? 2.5 : 1;
-    ctx.strokeStyle = hov && !it.disabled ? '#ffffff' : 'rgba(0,0,0,0.4)';
+    ctx.lineWidth = marked ? 2.5 : 1;
+    ctx.strokeStyle = marked ? '#ffffff' : 'rgba(0,0,0,0.4)';
     ctx.stroke();
     const lx = radial.cx + Math.cos(mid) * midR;
     const ly = radial.cy + Math.sin(mid) * midR;
-    ctx.fillStyle = it.disabled ? '#8893a5' : '#10141a';
+    ctx.fillStyle = (it.disabled || dim) ? '#8893a5' : '#10141a';
     ctx.font = F_BODY;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(it.label, lx, ly);
     if (it.children) {
       const cr = r1 - 8;
-      ctx.fillStyle = it.disabled ? '#8893a5' : 'rgba(16,20,26,0.75)';
+      ctx.fillStyle = (it.disabled || dim) ? '#8893a5' : 'rgba(16,20,26,0.75)';
       ctx.beginPath();
       ctx.moveTo(radial.cx + Math.cos(mid) * cr, radial.cy + Math.sin(mid) * cr);
       ctx.lineTo(radial.cx + Math.cos(mid - 0.09) * (cr - 6), radial.cy + Math.sin(mid - 0.09) * (cr - 6));
@@ -1582,11 +1587,41 @@ function drawRadialRing(items, ring, hover) {
     }
   }
 }
+function samePath(a, b) {
+  return a.length === b.length && a.every((v, i) => b[i] === v);
+}
 function drawRadial() {
   const hover = radialHitTest(mouse.x, mouse.y);
-  drawRadialRing(radial.items, 0, hover);
-  if (radial.openIndex >= 0 && radial.items[radial.openIndex].children)
-    drawRadialRing(radial.items[radial.openIndex].children, 1, hover);
+  const now = performance.now();
+  // hover-to-open: the desired open path is the ancestor chain of the hovered
+  // item, extended by the item itself when it has children. Growing the path
+  // (drilling deeper) applies instantly; collapsing or switching branches
+  // waits out a short grace window so a stray mouse move doesn't close it.
+  if (hover && !hover.item.disabled) {
+    const desired = radial.openPath.slice(0, hover.ring);
+    if (hover.item.children) desired.push(hover.index);
+    const grows = radial.openPath.every((v, i) => desired[i] === v);
+    if (grows) {
+      radial.openPath = desired;
+      radial.gracePath = null;
+    } else if (!radial.gracePath || !samePath(radial.gracePath, desired)) {
+      radial.gracePath = desired.slice();
+      radial.graceStart = now;
+    } else if (now - radial.graceStart >= RADIAL_GRACE_MS) {
+      radial.openPath = desired;
+      radial.gracePath = null;
+    }
+  } else if (!hover) {
+    radial.gracePath = null;
+  }
+  let items = radial.items;
+  drawRadialRing(items, 0, hover, radial.openPath[0] ?? -1);
+  for (let r = 0; r < radial.openPath.length; r++) {
+    const parent = items[radial.openPath[r]];
+    if (!parent || !parent.children) break;
+    items = parent.children;
+    drawRadialRing(items, r + 1, hover, radial.openPath[r + 1] ?? -1);
+  }
   ctx.beginPath();
   ctx.arc(radial.cx, radial.cy, HUB_R, 0, 2 * Math.PI);
   ctx.fillStyle = 'rgba(22,27,35,0.96)';
@@ -1623,7 +1658,7 @@ function render() {
 }
 /* ===================== Radial menus ===================== */
 function buildRadial(x, y, items) {
-  return { cx: x, cy: y, items, openIndex: -1 };
+  return { cx: x, cy: y, items, openPath: [] };
 }
 function ringRadii(ring) {
   const r0 = HUB_R + ring * (RING_W + RING_GAP);
@@ -1642,19 +1677,26 @@ function hitRing(count, ring, d, ang) {
   const idx = Math.floor((a + Math.PI / 2) / (2 * Math.PI / count));
   return (idx >= 0 && idx < count) ? idx : -1;
 }
+function radialVisibleRings() {
+  const rings = [radial.items];
+  let it = radial.items;
+  for (let r = 0; r < radial.openPath.length; r++) {
+    const parent = it[radial.openPath[r]];
+    if (!parent || !parent.children) break;
+    it = parent.children;
+    rings.push(it);
+  }
+  return rings;
+}
 function radialHitTest(x, y) {
   if (!radial) return null;
   const dx = x - radial.cx, dy = y - radial.cy;
   const d = Math.hypot(dx, dy), ang = Math.atan2(dy, dx);
-  if (radial.openIndex >= 0) {
-    const kids = radial.items[radial.openIndex].children;
-    if (kids) {
-      const i = hitRing(kids.length, 1, d, ang);
-      if (i !== -1) return { ring: 1, index: i, item: kids[i] };
-    }
+  const rings = radialVisibleRings();
+  for (let r = rings.length - 1; r >= 0; r--) {
+    const i = hitRing(rings[r].length, r, d, ang);
+    if (i !== -1) return { ring: r, index: i, item: rings[r][i] };
   }
-  const i0 = hitRing(radial.items.length, 0, d, ang);
-  if (i0 !== -1) return { ring: 0, index: i0, item: radial.items[i0] };
   return null;
 }
 function openSplitPopup(sx, sy, tid) {
@@ -1736,16 +1778,30 @@ function performSplit() {
          (connect ? ' joined by bond dim ' + bd : ' unconnected'));
 }
 function openAddRadial(x, y) {
-  const items = [0, 1, 2, 3, 4].map(r => ({
-    label: 'R' + r, color: rankHSL(r).slice(),
-    action: () => {
-      const w = screenToWorld(x, y);
-      const t = addTensor(w.x, w.y, r);
-      selection = new Set([t.id]);
-      updateInfo();
-      toast('Added rank-' + r + ' tensor');
-    },
-  }));
+  const items = [{
+    label: 'R', color: rankHSL(2).slice(),
+    children: [0, 1, 2, 3, 4].map(r => ({
+      label: 'R' + r, color: rankHSL(r).slice(),
+      action: () => {
+        const w = screenToWorld(x, y);
+        const t = addTensor(w.x, w.y, r);
+        selection = new Set([t.id]);
+        updateInfo();
+        toast('Added rank-' + r + ' tensor');
+      },
+    })),
+  }];
+  items.push({
+    label: 'n1', color: [50, 60, 60],
+    children: [
+      { label: 'n11', color: [120, 50, 60], action: () => toast('n11') },
+      { label: 'n12', color: [200, 55, 60], children: [
+        { label: 'n121', color: [260, 50, 62], action: () => toast('n121') },
+        { label: 'n122', color: [300, 50, 62], action: () => toast('n122') },
+      ] },
+      { label: 'n13', color: [20, 60, 60], action: () => toast('n13') },
+    ],
+  });
   const tgt = actionTargets();
   if (tgt.length === 0) {
     items.push({
@@ -1849,14 +1905,13 @@ function onMouseDown(e) {
   if (radial) {                                  // a menu is open
     const hit = radialHitTest(sx, sy);
     if (hit && !hit.item.disabled) {
-      if (hit.item.children && hit.ring === 0) {
-        radial.openIndex = (radial.openIndex === hit.index) ? -1 : hit.index;
-      } else if (hit.item.action) {
+      if (hit.item.action) {
         const act = hit.item.action;
         radial = null;
         pushUndo();
         act();
       }
+      // parents with children open on hover; a click on them keeps the menu
     } else if (!hit) {
       radial = null;
     }
@@ -2090,10 +2145,11 @@ function onWheel(e) {
 function onKeyDown(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
-  if (e.ctrlKey || e.metaKey) {
-    if (e.code === 'KeyC') { e.preventDefault(); copySelection(); }
-    else if (e.code === 'KeyV') { e.preventDefault(); pushUndo(); pasteClipboard(); }
-    else if (e.code === 'KeyZ') { e.preventDefault(); undo(); }
+  if (e.metaKey) {
+    const k = e.key.toLowerCase();
+    if (k === 'c') { e.preventDefault(); copySelection(); }
+    else if (k === 'v') { e.preventDefault(); pushUndo(); pasteClipboard(); }
+    else if (k === 'z') { e.preventDefault(); undo(); }
     return;
   }
 
