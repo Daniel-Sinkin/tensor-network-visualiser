@@ -119,6 +119,43 @@ function build_skeleton(
     return (; tensors, phys, h_links, v_links)
 end
 
+function peps_from_grid(tensors::Matrix{ITensor})
+    NR, NC = size(tensors)
+    NR >= 1 && NC >= 1 || throw(ArgumentError("empty grid"))
+    T = eltype(tensors[1, 1])
+
+    h_links = Matrix{Index{Int}}(undef, NR, NC - 1)
+    for r = 1:NR, c = 1:NC-1
+        shared = collect(intersect(Set(inds(tensors[r, c])), Set(inds(tensors[r, c+1]))))
+        length(shared) == 1 ||
+            error("expected exactly one shared index between ($r, $c) and ($r, $(c+1)), got $(length(shared))")
+        h_links[r, c] = shared[1]
+    end
+
+    v_links = Matrix{Index{Int}}(undef, NR - 1, NC)
+    for r = 1:NR-1, c = 1:NC
+        shared = collect(intersect(Set(inds(tensors[r, c])), Set(inds(tensors[r+1, c]))))
+        length(shared) == 1 ||
+            error("expected exactly one shared index between ($r, $c) and ($(r+1), $c), got $(length(shared))")
+        v_links[r, c] = shared[1]
+    end
+
+    phys = Matrix{Index{Int}}(undef, NR, NC)
+    for r = 1:NR, c = 1:NC
+        link_set = Set{Index{Int}}()
+        c > 1  && push!(link_set, h_links[r, c-1])
+        c < NC && push!(link_set, h_links[r, c])
+        r > 1  && push!(link_set, v_links[r-1, c])
+        r < NR && push!(link_set, v_links[r, c])
+        candidates = [idx for idx in inds(tensors[r, c]) if !(idx in link_set)]
+        length(candidates) == 1 ||
+            error("expected exactly one physical index at ($r, $c), got $(length(candidates))")
+        phys[r, c] = candidates[1]
+    end
+
+    return PEPS{T}(tensors, phys, h_links, v_links)
+end
+
 function fill_random_isometry!(peps::PEPS{T}) where {T}
     rows, cols = axes(peps)
     for row in rows, col in cols

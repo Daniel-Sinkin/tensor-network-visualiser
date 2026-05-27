@@ -2,7 +2,7 @@
 
 julia_version = "1.11.5"
 manifest_format = "2.0"
-project_hash = "d3f07b8a6ee428055d8d36b174c48a745903d93a"
+project_hash = "066d258e68c482dc281fad41e2db8cb46fd4755c"
 
 [[deps.Accessors]]
 deps = ["CompositionsBase", "ConstructionBase", "Dates", "InverseFunctions", "MacroTools"]
@@ -855,6 +855,12 @@ version = "0.5.0"
 deps = ["Libdl"]
 uuid = "83775a58-1f1d-513f-b197-d71354ab007a"
 version = "1.2.13+1"
+
+[[deps.dans_tn_core]]
+deps = ["ITensorMPS", "ITensors", "JSON3"]
+path = "/Users/danielsinkin/GitHub_private/dans-tn-core"
+uuid = "e0f4d540-2ccb-407f-acff-b57310310eb6"
+version = "0.1.0"
 
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]

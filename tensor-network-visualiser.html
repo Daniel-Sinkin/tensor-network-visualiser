@@ -69,9 +69,15 @@
     font-size: 11.5px;
   }
   #controls h2 {
-    font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
     color: #7d8aa0; margin-bottom: 9px; font-weight: 600;
+    cursor: pointer; user-select: none;
+    white-space: nowrap;
   }
+  #controls h2:hover { color: #c8d2e0; }
+  #controls.collapsed h2 { margin-bottom: 0; }
+  #controls.collapsed > *:not(h2) { display: none; }
+  #controls.collapsed { width: auto; }
   #controls .kb { display: flex; justify-content: space-between; padding: 2.5px 0; color: #9aa6b8; }
   #controls .kb kbd {
     background: #2b3340; border: 1px solid #3a4456; border-radius: 4px;
@@ -181,6 +187,38 @@
     color: #6f7c92; white-space: pre-wrap;
     pointer-events: none;
   }
+
+  #framebar {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
+    display: none; gap: 8px; align-items: center;
+    padding: 7px 12px; font-size: 12px; z-index: 25;
+  }
+  #framebar.show { display: flex; }
+  #framebar .fb-btn {
+    background: #2b3340; border: 1px solid #3a4456; color: #d6dce5;
+    padding: 4px 9px; border-radius: 5px; cursor: pointer;
+    font-family: inherit; font-size: 12px; min-width: 28px;
+  }
+  #framebar .fb-btn:hover { background: #353f4f; }
+  #framebar .fb-btn:disabled { opacity: 0.45; cursor: default; }
+  #framebar #fbStatus {
+    color: #c8d2e0; font-variant-numeric: tabular-nums;
+    min-width: 140px; text-align: center;
+  }
+
+  #descPanel {
+    position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+    max-width: 620px; padding: 10px 18px;
+    font-size: 12.5px; line-height: 1.5;
+    color: #c8d2e0; text-align: center;
+    display: none; z-index: 5;
+  }
+  #descPanel.show { display: block; }
+  #descPanel .desc-label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: #7d8aa0; margin-bottom: 5px; font-weight: 600;
+  }
+  #descPanel .desc-body { color: #d6dce5; }
 </style>
 </head>
 <body>
@@ -219,6 +257,11 @@
     <div class="legend-title">Colour by rank</div>
     <div class="legend-grid" id="legendGrid"></div>
   </div>
+  <div class="dim-ctl" style="border-top:1px solid #2b3340; padding-top:10px; margin-top:10px; gap:6px">
+    <button id="loadFileBtn" class="sp-btn">Load file...</button>
+    <button id="loadBtn" class="sp-btn">Load folder...</button>
+  </div>
+  <div class="kb" style="margin-top:6px"><span>Step frames</span><span>arrows / Home / End</span></div>
 </div>
 
 <div id="info" class="panel">
@@ -287,6 +330,23 @@
 <div id="toast"></div>
 <div id="log"></div>
 
+<div id="descPanel" class="panel">
+  <div class="desc-label" id="descLabel"></div>
+  <div class="desc-body" id="descBody"></div>
+</div>
+
+<div id="framebar" class="panel">
+  <button id="fbFirst" class="fb-btn" title="first">|&lt;</button>
+  <button id="fbPrev"  class="fb-btn" title="prev (left arrow)">&lt;</button>
+  <span id="fbStatus">frame 0 / 0</span>
+  <button id="fbNext"  class="fb-btn" title="next (right arrow)">&gt;</button>
+  <button id="fbLast"  class="fb-btn" title="last">&gt;|</button>
+  <button id="fbClose" class="fb-btn" title="unload" style="margin-left:8px">x</button>
+</div>
+
+<input id="folderInput" type="file" webkitdirectory directory multiple style="display:none">
+<input id="fileInput" type="file" accept=".json,.jsonl" multiple style="display:none">
+
 <script>
 "use strict";
 
@@ -305,9 +365,9 @@ const MAX_TENSOR_SIZE = 1 << 22;          // 4,194,304 elements (~32 MB)
 const HUB_R = 27, RING_W = 58, RING_GAP = 4;
 const RADIAL_GRACE_MS = 200;
 
-const F_BODY  = '600 12px -apple-system, "Segoe UI", Roboto, sans-serif';
-const F_MONO  = '600 10px "SF Mono", Menlo, Consolas, monospace';
-const F_SMALL = '600 9px -apple-system, "Segoe UI", sans-serif';
+const F_BODY  = '400 10.5px -apple-system, "Segoe UI", Roboto, sans-serif';
+const F_MONO  = '400 9.5px "SF Mono", Menlo, Consolas, monospace';
+const F_SMALL = '500 9px -apple-system, "Segoe UI", sans-serif';
 
 let tensors = [];
 let bonds = [];
@@ -334,6 +394,9 @@ let builderState = null;     // open builder window: { type, wx, wy }
 let legPopupState = null;    // open add-leg popup: { tid }
 let grabbing = null;         // g-key move: { items:[{id,x0,y0}], ax, ay }
 let dataWinState = null;     // open data window: { tid, perm }
+let frames = [];             // loaded replay frames (each a scene snapshot)
+let frameIndex = -1;
+let frameSource = null;
 const mouse = { x: 0, y: 0 };
 
 /* ===================== Small helpers ===================== */
@@ -474,9 +537,56 @@ function freshLegIds(n) {
 function legAngle(t, i) {
   return t.legAngles[i];
 }
+function squareEdgeRadius(a, r) {
+  const s = Math.max(Math.abs(Math.cos(a)), Math.abs(Math.sin(a)));
+  return s > 1e-9 ? r / s : r;
+}
+function squareEdgePoint(cx, cy, r, a) {
+  const er = squareEdgeRadius(a, r);
+  return { x: cx + Math.cos(a) * er, y: cy + Math.sin(a) * er };
+}
+// Find where a ray from tensor center at angle a hits the bevelled-square boundary,
+// and return the outward normal at that point. On flat edges the normal is axis-aligned;
+// on a corner bevel it's radial from the bevel arc's center.
+function legAnchor(cx, cy, r, a) {
+  const corner = Math.max(4, r * 0.32);
+  const flat = r - corner;
+  const ca = Math.cos(a), sa = Math.sin(a);
+  const ax_ = Math.abs(ca), ay_ = Math.abs(sa);
+  if (ax_ < 1e-9 && ay_ < 1e-9) return { ax: cx + r, ay: cy, nx: 1, ny: 0 };
+  const s = Math.max(ax_, ay_);
+  const k = r / s;
+  const ex = cx + ca * k;
+  const ey = cy + sa * k;
+  if (ax_ >= ay_) {
+    if (Math.abs(ey - cy) <= flat) {
+      return { ax: ex, ay: ey, nx: ca > 0 ? 1 : -1, ny: 0 };
+    }
+  } else {
+    if (Math.abs(ex - cx) <= flat) {
+      return { ax: ex, ay: ey, nx: 0, ny: sa > 0 ? 1 : -1 };
+    }
+  }
+  const sx = ca > 0 ? 1 : -1;
+  const sy = sa > 0 ? 1 : -1;
+  const ccx = cx + sx * flat;
+  const ccy = cy + sy * flat;
+  const dx = ccx - cx, dy = ccy - cy;
+  const B = -2 * (dx * ca + dy * sa);
+  const C = dx * dx + dy * dy - corner * corner;
+  const disc = B * B - 4 * C;
+  if (disc < 0) return { ax: ex, ay: ey, nx: ca, ny: sa };
+  const ts = (-B + Math.sqrt(disc)) / 2;
+  const px = cx + ts * ca;
+  const py = cy + ts * sa;
+  let nx = px - ccx, ny = py - ccy;
+  const nl = Math.hypot(nx, ny) || 1;
+  return { ax: px, ay: py, nx: nx / nl, ny: ny / nl };
+}
 function legPoint(t, i) {
   const a = legAngle(t, i), r = radiusOf(t);
-  return { x: t.x + Math.cos(a) * r, y: t.y + Math.sin(a) * r };
+  const anc = legAnchor(t.x, t.y, r, a);
+  return { x: anc.ax, y: anc.ay };
 }
 function angleDiff(a, b) {
   let d = (a - b) % (2 * Math.PI);
@@ -487,7 +597,16 @@ function angleDiff(a, b) {
 function tensorAt(x, y) {
   for (let i = tensors.length - 1; i >= 0; i--) {
     const t = tensors[i], r = radiusOf(t);
-    if ((x - t.x) ** 2 + (y - t.y) ** 2 <= r * r) return t;
+    if (Math.abs(x - t.x) <= r && Math.abs(y - t.y) <= r) return t;
+  }
+  return null;
+}
+function abstractionAt(x, y) {
+  for (let i = abstractions.length - 1; i >= 0; i--) {
+    const ab = abstractions[i];
+    const bb = abstractionBBox(ab);
+    if (!bb) continue;
+    if (x >= bb.x && x <= bb.x + bb.w && y >= bb.y && y <= bb.y + bb.h) return ab;
   }
   return null;
 }
@@ -531,8 +650,9 @@ function freeLegTipAt(wx, wy) {
     for (let i = 0; i < t.rank; i++) {
       if (used.has(i)) continue;
       const a = legAngle(t, i);
-      const tx = t.x + Math.cos(a) * (r + LEG_STUB);
-      const ty = t.y + Math.sin(a) * (r + LEG_STUB);
+      const anc = legAnchor(t.x, t.y, r, a);
+      const tx = anc.ax + anc.nx * LEG_STUB;
+      const ty = anc.ay + anc.ny * LEG_STUB;
       if ((wx - tx) ** 2 + (wy - ty) ** 2 <= grab * grab)
         return { tensor: t, legIndex: i };
     }
@@ -643,6 +763,10 @@ function copySelection() {
     legPrime: t.legPrime.slice(),
     color: t.color.slice(), data: t.data.slice(),
     dataIm: t.dataIm ? t.dataIm.slice() : null,
+    label: t.label,
+    srcInds: t._srcInds ? t._srcInds.map(s => ({
+      id: s.id, plev: s.plev, tags: s.tags ? s.tags.slice() : [],
+    })) : null,
   }));
   const cbonds = [];
   for (const b of bonds) {
@@ -664,7 +788,10 @@ function pasteClipboard() {
       legId: freshLegIds(spec.rank),
       color: spec.color.slice(), data: spec.data.slice(),
       dataIm: spec.dataIm ? spec.dataIm.slice() : null,
-      label: 'T' + (nextLabel++),
+      label: spec.label ? spec.label + '*' : 'T' + (nextLabel++),
+      _srcInds: spec.srcInds ? spec.srcInds.map(s => ({
+        id: s.id, plev: s.plev, tags: s.tags ? s.tags.slice() : [],
+      })) : undefined,
     };
     tensors.push(t);
     return t;
@@ -740,11 +867,13 @@ function bondsCrossedBy(path) {
   }
   return hit;
 }
-function cutBond(b) {
+function cutBond(b, bulge) {
   const A = getTensor(b.a), B = getTensor(b.b);
   if (A && B) {
-    A.legAngles[b.ai] = Math.atan2(B.y - A.y, B.x - A.x);
-    B.legAngles[b.bi] = Math.atan2(A.y - B.y, A.x - B.x);
+    const bx = bulge ? bulge.bulgeX : (A.x + B.x) / 2;
+    const by = bulge ? bulge.bulgeY : (A.y + B.y) / 2;
+    A.legAngles[b.ai] = Math.atan2(by - A.y, bx - A.x);
+    B.legAngles[b.bi] = Math.atan2(by - B.y, bx - B.x);
   }
   bonds = bonds.filter(x => x.id !== b.id);
 }
@@ -923,7 +1052,7 @@ function abstractionBBox(ab) {
     maxX = Math.max(maxX, t.x + r); maxY = Math.max(maxY, t.y + r);
   }
   if (!isFinite(minX)) return null;
-  const pad = 16;
+  const pad = 32;
   return { x: minX - pad, y: minY - pad, w: maxX - minX + 2 * pad, h: maxY - minY + 2 * pad };
 }
 function drawAbstraction(ab) {
@@ -1003,6 +1132,419 @@ function buildPEPS(R, C, chi, phys, cx, cy) {
   const sites = [];
   for (let r = 0; r < R; r++) for (let c = 0; c < C; c++) sites.push(grid[r][c]);
   return sites;
+}
+/* ===================== Frame replay (load JSON snapshots) ===================== */
+function tensorFromContent(content, ctx) {
+  const indices = content.indices;
+  const dims = indices.map(i => Number(i.dim));
+  const n = dims.reduce((a, b) => a * b, 1);
+  const isComplex = String(content.eltype).startsWith('Complex');
+  const raw = content.data || [];
+  let data, dataIm = null;
+  if (isComplex) {
+    data = new Float64Array(n);
+    dataIm = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      data[i] = Number(raw[2*i] ?? 0);
+      dataIm[i] = Number(raw[2*i + 1] ?? 0);
+    }
+  } else {
+    data = new Float64Array(n);
+    for (let i = 0; i < n; i++) data[i] = Number(raw[i] ?? 0);
+  }
+  return {
+    id: ctx.id,
+    label: ctx.label,
+    x: ctx.x, y: ctx.y,
+    rank: dims.length,
+    dims,
+    legAngles: ctx.legAngles ? ctx.legAngles.slice() : defaultLegAngles(dims.length),
+    legPrime: indices.map(i => Number(i.plev) || 0),
+    legId: ctx.legId.slice(),
+    color: rankHSL(dims.length).slice(),
+    data, dataIm,
+    _srcInds: indices.map(i => ({
+      id: String(i.id),
+      plev: Number(i.plev) || 0,
+      tags: Array.isArray(i.tags) ? i.tags.map(String) : [],
+    })),
+  };
+}
+function detectBondsFromIndices(tensorList, startBondId) {
+  const map = new Map();
+  tensorList.forEach((t, ti) => {
+    t._srcInds.forEach((ind, li) => {
+      const k = ind.id + '|' + ind.plev;
+      if (!map.has(k)) map.set(k, []);
+      map.get(k).push([ti, li]);
+    });
+  });
+  let bondId = startBondId;
+  const out = [];
+  for (const arr of map.values()) {
+    if (arr.length === 2) {
+      const [[ati, ai], [bti, bi]] = arr;
+      out.push({ id: bondId++, a: tensorList[ati].id, ai, b: tensorList[bti].id, bi });
+    }
+  }
+  return { bonds: out, nextBondId: bondId };
+}
+function _seededRng(seed) {
+  let s = (seed >>> 0) || 1;
+  return () => {
+    s = Math.imul(s ^ (s >>> 15), s | 1);
+    s ^= s + Math.imul(s ^ (s >>> 7), s | 61);
+    return (((s ^ (s >>> 14)) >>> 0) / 4294967296);
+  };
+}
+function _spread(n, center, range) {
+  if (n === 1) return [center];
+  return Array.from({ length: n }, (_, k) =>
+    center - range / 2 + range * k / (n - 1));
+}
+function distributeFreeLegs(t, used, layout) {
+  const free = [];
+  for (let i = 0; i < t.rank; i++) if (!used.has(i)) free.push(i);
+  if (free.length === 0) return;
+  const rng = _seededRng(t.id * 2654435761 + free.length * 13);
+  let bases;
+  if (layout === 'MPS') {
+    bases = _spread(free.length, Math.PI / 2, Math.min(Math.PI * 0.55, 0.5 + free.length * 0.18));
+  } else if (layout === 'MPO') {
+    bases = free.map((_, k) => {
+      const side = (k & 1) === 0 ? Math.PI / 2 : -Math.PI / 2;
+      const tier = (k >> 1);
+      const off = tier * 0.45;
+      return side + (tier % 2 === 0 ? off : -off);
+    });
+  } else if (layout === 'PEPS') {
+    bases = _spread(free.length, -Math.PI / 4, Math.min(Math.PI * 0.45, 0.4 + free.length * 0.15));
+  } else {
+    const defs = defaultLegAngles(t.rank);
+    bases = free.map((_, k) => defs[k]);
+  }
+  for (let k = 0; k < free.length; k++) {
+    const jitter = (rng() - 0.5) * 0.28;
+    t.legAngles[free[k]] = bases[k] + jitter;
+  }
+}
+function assignAnglesByLayout(tensorList, bondList, layout) {
+  for (const t of tensorList) {
+    const used = new Set();
+    for (const b of bondList) {
+      if (b.a === t.id) {
+        const o = tensorList.find(tt => tt.id === b.b);
+        if (o) { t.legAngles[b.ai] = Math.atan2(o.y - t.y, o.x - t.x); used.add(b.ai); }
+      } else if (b.b === t.id) {
+        const o = tensorList.find(tt => tt.id === b.a);
+        if (o) { t.legAngles[b.bi] = Math.atan2(o.y - t.y, o.x - t.x); used.add(b.bi); }
+      }
+    }
+    distributeFreeLegs(t, used, layout);
+  }
+}
+function frameFinalize(tensorList, bondList, absList, name, source) {
+  let maxTid = 0, maxLeg = 0, maxBond = 0, maxAbs = 0;
+  for (const t of tensorList) {
+    if (t.id > maxTid) maxTid = t.id;
+    for (const l of t.legId) if (l > maxLeg) maxLeg = l;
+  }
+  for (const b of bondList) if (b.id > maxBond) maxBond = b.id;
+  for (const a of absList) if (a.id > maxAbs) maxAbs = a.id;
+  return {
+    name, source,
+    tensors: tensorList,
+    bonds: bondList,
+    abstractions: absList,
+    nextId: maxTid + 1,
+    nextLabel: maxTid + 1,
+    nextBondId: maxBond + 1,
+    nextLegId: maxLeg + 1,
+    nextAbsId: maxAbs + 1,
+  };
+}
+function frameFromTensorEnv(env, name) {
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  const indCount = env.content.indices.length;
+  const legId = [];
+  for (let k = 1; k <= indCount; k++) legId.push(k);
+  const t = tensorFromContent(env.content, {
+    id: 1, label: 'T1', x: cx, y: cy, legId,
+  });
+  return frameFinalize([t], [], [], name, 'Tensor');
+}
+function frameFromChainEnv(env, name, layoutKind) {
+  const c = env.content;
+  const n = Number(c.length) | 0;
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  const spacing = 130;
+  const x0 = cx - (n - 1) * spacing / 2;
+  const tensorList = [];
+  let legCounter = 1;
+  for (let i = 0; i < n; i++) {
+    const tEnv = c.tensors[i];
+    const indCount = tEnv.content.indices.length;
+    const legId = [];
+    for (let k = 0; k < indCount; k++) legId.push(legCounter++);
+    const t = tensorFromContent(tEnv.content, {
+      id: i + 1, label: 'T' + (i + 1),
+      x: x0 + i * spacing, y: cy, legId,
+    });
+    tensorList.push(t);
+  }
+  const { bonds, nextBondId } = detectBondsFromIndices(tensorList, 1);
+  assignAnglesByLayout(tensorList, bonds, layoutKind);
+  const absId = 1;
+  const abs = [{ id: absId, type: layoutKind, name: layoutKind,
+                 members: tensorList.map(t => t.id) }];
+  for (const t of tensorList) t.absId = absId;
+  const f = frameFinalize(tensorList, bonds, abs, name, layoutKind);
+  f.nextBondId = nextBondId;
+  return f;
+}
+function frameFromPEPSEnv(env, name) {
+  const c = env.content;
+  const nr = Number(c.num_rows) | 0;
+  const nc = Number(c.num_cols) | 0;
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  const spacing = 130;
+  const x0 = cx - (nc - 1) * spacing / 2;
+  const y0 = cy - (nr - 1) * spacing / 2;
+  const tensorList = [];
+  let legCounter = 1;
+  let nextTid = 1;
+  for (let r = 0; r < nr; r++) {
+    for (let col = 0; col < nc; col++) {
+      const tEnv = c.tensors[r][col];
+      const indCount = tEnv.content.indices.length;
+      const legId = [];
+      for (let k = 0; k < indCount; k++) legId.push(legCounter++);
+      const t = tensorFromContent(tEnv.content, {
+        id: nextTid, label: 'T' + nextTid,
+        x: x0 + col * spacing, y: y0 + r * spacing, legId,
+      });
+      nextTid++;
+      tensorList.push(t);
+    }
+  }
+  const { bonds, nextBondId } = detectBondsFromIndices(tensorList, 1);
+  assignAnglesByLayout(tensorList, bonds, 'PEPS');
+  const absId = 1;
+  const abs = [{ id: absId, type: 'PEPS', name: 'PEPS',
+                 members: tensorList.map(t => t.id) }];
+  for (const t of tensorList) t.absId = absId;
+  const f = frameFinalize(tensorList, bonds, abs, name, 'PEPS');
+  f.nextBondId = nextBondId;
+  return f;
+}
+function buildFrame(env, name) {
+  if (Number(env.version) !== 1)
+    throw new Error('unsupported envelope version ' + env.version);
+  const v = String(env.variant);
+  if (v === 'Tensor') return frameFromTensorEnv(env, name);
+  if (v === 'MPS') return frameFromChainEnv(env, name, 'MPS');
+  if (v === 'MPO') return frameFromChainEnv(env, name, 'MPO');
+  if (v === 'PEPS') return frameFromPEPSEnv(env, name);
+  if (v === 'Snapshot') return frameFromSnapshotEnv(env, name);
+  if (v === 'Environment') return frameFromEnvironmentEnv(env, name);
+  throw new Error('unknown variant: ' + v);
+}
+function frameFromEnvironmentEnv(env, name) {
+  const c = env.content || {};
+  const mps = c.mps;
+  if (!mps) return frameFinalize([], [], [], name, 'Environment');
+  const f = buildFrame(mps, name);
+  if (f.abstractions[0]) {
+    f.abstractions[0].type = 'Environment';
+    const layer = c.layer ? String(c.layer) : '';
+    const ln = (typeof c.lognorm === 'number') ? ' ln=' + c.lognorm.toFixed(3) : '';
+    f.abstractions[0]._envSuffix = (layer ? '/' + layer : '') + ln;
+  }
+  return f;
+}
+function tensorsBBox(ts) {
+  if (!ts.length) return { minX: 0, maxX: 0, minY: 0, maxY: 0 };
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const t of ts) {
+    if (t.x < minX) minX = t.x; if (t.x > maxX) maxX = t.x;
+    if (t.y < minY) minY = t.y; if (t.y > maxY) maxY = t.y;
+  }
+  return { minX, maxX, minY, maxY };
+}
+function frameFromSnapshotEnv(env, name) {
+  const c = env.content || {};
+  const items = c.items || [];
+  if (items.length === 0)
+    return frameFinalize([], [], [], name + (c.label ? ' [' + c.label + ']' : ''), 'Snapshot');
+  const subs = items.map(it => ({
+    name: String(it.name),
+    frame: buildFrame(it.payload, name + ':' + it.name),
+  }));
+  const boxes = subs.map(s => tensorsBBox(s.frame.tensors));
+  const gap = 220;
+  let totalW = 0;
+  for (const b of boxes) totalW += Math.max(80, b.maxX - b.minX);
+  totalW += gap * (boxes.length - 1);
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  let leftX = cx - totalW / 2;
+  const allT = [], allB = [], allA = [];
+  let tidOff = 0, legOff = 0, bidOff = 0, aidOff = 0;
+  for (let k = 0; k < subs.length; k++) {
+    const sub = subs[k];
+    const box = boxes[k];
+    const subW = Math.max(80, box.maxX - box.minX);
+    const subCx = leftX + subW / 2;
+    leftX += subW + gap;
+    const dx = subCx - (box.minX + box.maxX) / 2;
+    const dy = cy - (box.minY + box.maxY) / 2;
+    for (const t of sub.frame.tensors) {
+      t.id += tidOff;
+      t.x += dx; t.y += dy;
+      t.label = sub.name + '.' + t.label;
+      t.legId = t.legId.map(l => l + legOff);
+      if (t.absId != null) t.absId += aidOff;
+      allT.push(t);
+    }
+    for (const b of sub.frame.bonds) {
+      b.id += bidOff;
+      b.a += tidOff;
+      b.b += tidOff;
+      allB.push(b);
+    }
+    for (const ab of sub.frame.abstractions) {
+      ab.id += aidOff;
+      const sfx = ab._envSuffix || '';
+      ab.name = sub.name + ' (' + ab.type + sfx + ')';
+      ab.members = ab.members.map(m => m + tidOff);
+      allA.push(ab);
+    }
+    tidOff += sub.frame.nextId;
+    legOff += sub.frame.nextLegId;
+    bidOff += sub.frame.nextBondId;
+    aidOff += sub.frame.nextAbsId;
+  }
+  const tag = c.label ? ' [' + c.label + ']' : '';
+  const f = frameFinalize(allT, allB, allA, name + tag, 'Snapshot');
+  f.label = c.label ? String(c.label) : null;
+  f.description = c.description ? String(c.description) : null;
+  return f;
+}
+function cloneTensorForFrame(t) {
+  return {
+    id: t.id, label: t.label, x: t.x, y: t.y,
+    rank: t.rank, dims: t.dims.slice(),
+    legAngles: t.legAngles.slice(),
+    legPrime: t.legPrime.slice(),
+    legId: t.legId.slice(),
+    color: t.color.slice(),
+    data: t.data.slice(),
+    dataIm: t.dataIm ? t.dataIm.slice() : null,
+    absId: t.absId,
+    _srcInds: t._srcInds,
+  };
+}
+function applyFrame(i) {
+  if (frames.length === 0) return;
+  i = Math.max(0, Math.min(frames.length - 1, i));
+  frameIndex = i;
+  const f = frames[i];
+  tensors = f.tensors.map(cloneTensorForFrame);
+  bonds = f.bonds.map(b => ({ id: b.id, a: b.a, ai: b.ai, b: b.b, bi: b.bi }));
+  abstractions = f.abstractions.map(a => ({
+    id: a.id, type: a.type, name: a.name, members: a.members.slice(),
+  }));
+  nextId = f.nextId;
+  nextLabel = f.nextLabel;
+  nextBondId = f.nextBondId;
+  nextLegId = f.nextLegId;
+  nextAbsId = f.nextAbsId;
+  selection = new Set();
+  selAbs = new Set();
+  drag = null; radial = null; placing = null; grabbing = null;
+  if (splitState) closeSplitPopup();
+  if (builderState) closeBuilder();
+  if (legPopupState) closeLegPopup();
+  if (dataWinState) closeDataWindow();
+  updateInfo();
+  updateFrameBar();
+  updateDescription(f);
+}
+function updateDescription(f) {
+  const el = document.getElementById('descPanel');
+  if (!f || !f.description) {
+    el.classList.remove('show');
+    return;
+  }
+  document.getElementById('descLabel').textContent = f.label || '';
+  document.getElementById('descBody').textContent = f.description;
+  el.classList.add('show');
+}
+function updateFrameBar() {
+  const bar = document.getElementById('framebar');
+  if (frames.length === 0) { bar.classList.remove('show'); return; }
+  bar.classList.add('show');
+  const status = document.getElementById('fbStatus');
+  const f = frames[frameIndex];
+  status.textContent = (frameIndex + 1) + ' / ' + frames.length +
+    (f && f.name ? '  ' + f.name : '');
+  document.getElementById('fbPrev').disabled = frameIndex <= 0;
+  document.getElementById('fbFirst').disabled = frameIndex <= 0;
+  document.getElementById('fbNext').disabled = frameIndex >= frames.length - 1;
+  document.getElementById('fbLast').disabled = frameIndex >= frames.length - 1;
+}
+function unloadFrames() {
+  frames = [];
+  frameIndex = -1;
+  frameSource = null;
+  tensors = [];
+  bonds = [];
+  abstractions = [];
+  selection = new Set();
+  selAbs = new Set();
+  updateInfo();
+  updateFrameBar();
+  updateDescription(null);
+  toast('Frames unloaded');
+}
+async function loadFolder(fileList) {
+  const files = [...fileList].filter(f => {
+    const n = f.name.toLowerCase();
+    return n.endsWith('.json') || n.endsWith('.jsonl');
+  });
+  if (files.length === 0) { toast('No .json or .jsonl files in folder', true); return; }
+  files.sort((a, b) =>
+    (a.webkitRelativePath || a.name).localeCompare(b.webkitRelativePath || b.name));
+  const built = [];
+  for (const f of files) {
+    let text;
+    try { text = await f.text(); }
+    catch (err) { toast('Read failed: ' + f.name, true); return; }
+    try {
+      if (f.name.toLowerCase().endsWith('.jsonl')) {
+        let li = 0;
+        for (const line of text.split('\n')) {
+          const s = line.trim();
+          if (!s) continue;
+          li++;
+          built.push(buildFrame(JSON.parse(s), f.name + ':' + li));
+        }
+      } else {
+        built.push(buildFrame(JSON.parse(text), f.name));
+      }
+    } catch (err) {
+      toast(f.name + ': ' + err.message, true);
+      return;
+    }
+  }
+  if (built.length === 0) { toast('No envelopes found', true); return; }
+  frames = built;
+  frameSource = files[0].webkitRelativePath
+    ? files[0].webkitRelativePath.split('/')[0]
+    : 'files';
+  applyFrame(0);
+  logMsg('loaded ' + frames.length + ' frame' +
+    (frames.length === 1 ? '' : 's') + ' from ' + frameSource);
+  toast('Loaded ' + frames.length + ' frame' + (frames.length === 1 ? '' : 's'));
 }
 function analyzeMerge(ids) {
   if (ids.length < 2) return { mpsOk: false, mpoOk: false, order: null };
@@ -1328,13 +1870,14 @@ function drawGrid() {
   const x0 = Math.floor(tl.x / step) * step;
   const y0 = Math.floor(tl.y / step) * step;
   const dotR = 1.1 / cam.zoom;
-  ctx.fillStyle = 'rgba(255,255,255,0.022)';
+  const path = new Path2D();
   for (let x = x0; x <= br.x; x += step)
     for (let y = y0; y <= br.y; y += step) {
-      ctx.beginPath();
-      ctx.arc(x, y, dotR, 0, 2 * Math.PI);
-      ctx.fill();
+      path.moveTo(x + dotR, y);
+      path.arc(x, y, dotR, 0, 2 * Math.PI);
     }
+  ctx.fillStyle = 'rgba(255,255,255,0.022)';
+  ctx.fill(path);
 }
 
 function bondGeom(b) {
@@ -1372,21 +1915,27 @@ function drawBond(b) {
   ctx.lineWidth = 3;
   ctx.stroke();
 
-  // bond dimension pill at the bulge point
-  const mx = bg.bulgeX, my = bg.bulgeY;
-  const txt = String(A.dims[b.ai]);
-  ctx.font = F_SMALL;
-  const pw = ctx.measureText(txt).width + 8;
-  pillPath(mx - pw / 2, my - 7, pw, 14, 5);
-  ctx.fillStyle = '#1b2330';
-  ctx.fill();
-  ctx.strokeStyle = '#33405a';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-  ctx.fillStyle = '#9fb0c8';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(txt, mx, my + 0.5);
+  // bond name pill at the bulge point (tags + prime, shared by both endpoints)
+  const ind = A._srcInds && A._srcInds[b.ai];
+  const tags = (ind && ind.tags && ind.tags.length) ? ind.tags.join(',') : '';
+  const p = (A.legPrime && A.legPrime[b.ai]) || 0;
+  const primeStr = p > 0 ? (p <= 4 ? "'".repeat(p) : p + "'") : '';
+  const txt = tags + primeStr;
+  if (txt) {
+    const mx = bg.bulgeX, my = bg.bulgeY;
+    ctx.font = F_SMALL;
+    const pw = ctx.measureText(txt).width + 10;
+    pillPath(mx - pw / 2, my - 7, pw, 14, 5);
+    ctx.fillStyle = '#1b2330';
+    ctx.fill();
+    ctx.strokeStyle = '#33405a';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = '#c8d2e0';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(txt, mx, my + 0.5);
+  }
 }
 
 function legIsActive(tid, i) {
@@ -1397,12 +1946,12 @@ function legIsActive(tid, i) {
 
 function drawFreeLegs(t, used) {
   const r = radiusOf(t);
-  const showDims = selection.has(t.id) || used.size > 0;
   for (let i = 0; i < t.rank; i++) {
     if (used.has(i)) continue;
     const a = legAngle(t, i);
-    const x1 = t.x + Math.cos(a) * r, y1 = t.y + Math.sin(a) * r;
-    const x2 = t.x + Math.cos(a) * (r + LEG_STUB), y2 = t.y + Math.sin(a) * (r + LEG_STUB);
+    const anc = legAnchor(t.x, t.y, r, a);
+    const x1 = anc.ax, y1 = anc.ay;
+    const x2 = anc.ax + anc.nx * LEG_STUB, y2 = anc.ay + anc.ny * LEG_STUB;
     const active = legIsActive(t.id, i);
     ctx.beginPath();
     ctx.moveTo(x1, y1);
@@ -1420,57 +1969,61 @@ function drawFreeLegs(t, used) {
     ctx.arc(x2, y2, active ? 4 : 2.4, 0, 2 * Math.PI);
     ctx.fillStyle = active ? '#ffffff' : colL(t.color, 10);
     ctx.fill();
-    if (showDims) {
-      const dm = r + LEG_STUB * 0.5;
-      ctx.fillStyle = '#8b97a8';
+    const tagSrc = t._srcInds && t._srcInds[i] && t._srcInds[i].tags;
+    const tagStr = (tagSrc && tagSrc.length) ? tagSrc.join(',') : '';
+    const p = (t.legPrime && t.legPrime[i] > 0) ? t.legPrime[i] : 0;
+    const primeStr = p > 0 ? (p <= 4 ? "'".repeat(p) : p + "'") : '';
+    const label = tagStr + primeStr;
+    if (label) {
+      const lx = x2 + anc.nx * 7;
+      const ly = y2 + anc.ny * 7;
+      ctx.fillStyle = '#c8d2e0';
       ctx.font = F_SMALL;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(t.dims[i]),
-                   t.x + Math.cos(a) * dm + Math.cos(a + Math.PI / 2) * 7,
-                   t.y + Math.sin(a) * dm + Math.sin(a + Math.PI / 2) * 7);
-    }
-    if (t.legPrime && t.legPrime[i] > 0) {
-      const p = t.legPrime[i];
-      ctx.fillStyle = '#d6dce5';
-      ctx.font = F_SMALL;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(p <= 4 ? "'".repeat(p) : p + "'",
-                   t.x + Math.cos(a) * (r + LEG_STUB + 8),
-                   t.y + Math.sin(a) * (r + LEG_STUB + 8));
+      const right = anc.nx >= 0;
+      ctx.textAlign = anc.nx === 0 ? 'center' : (right ? 'left' : 'right');
+      ctx.textBaseline = anc.ny < 0 ? 'bottom' : (anc.ny > 0 ? 'top' : 'middle');
+      ctx.fillText(label, lx, ly);
     }
   }
 }
 
+function bevelRectPath(cx, cy, halfSize, corner) {
+  const x = cx - halfSize, y = cy - halfSize;
+  const w = 2 * halfSize, h = 2 * halfSize;
+  const c = Math.min(corner, halfSize);
+  ctx.beginPath();
+  ctx.moveTo(x + c, y);
+  ctx.arcTo(x + w, y,     x + w, y + h, c);
+  ctx.arcTo(x + w, y + h, x,     y + h, c);
+  ctx.arcTo(x,     y + h, x,     y,     c);
+  ctx.arcTo(x,     y,     x + w, y,     c);
+  ctx.closePath();
+}
 function drawTensor(t) {
   const r = radiusOf(t);
   const sel = selection.has(t.id);
   const hov = hoverId === t.id;
   const cHov = connectHoverId === t.id;
+  const corner = Math.max(4, r * 0.32);
 
   if (sel || cHov) {
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, r + 7, 0, 2 * Math.PI);
+    bevelRectPath(t.x, t.y, r + 7, corner + 5);
     ctx.fillStyle = cHov ? 'rgba(124,198,255,0.22)' : 'rgba(255,255,255,0.10)';
     ctx.fill();
   }
 
-  const grad = ctx.createRadialGradient(
-    t.x - r * 0.35, t.y - r * 0.35, r * 0.15, t.x, t.y, r);
+  const grad = ctx.createLinearGradient(t.x - r, t.y - r, t.x + r, t.y + r);
   grad.addColorStop(0, colL(t.color, hov || cHov ? 20 : 12));
   grad.addColorStop(1, colL(t.color, hov || cHov ? 2 : -7));
-  ctx.beginPath();
-  ctx.arc(t.x, t.y, r, 0, 2 * Math.PI);
+  bevelRectPath(t.x, t.y, r, corner);
   ctx.fillStyle = grad;
   ctx.fill();
   ctx.lineWidth = sel ? 3 : 1.5;
   ctx.strokeStyle = sel ? '#ffffff' : colL(t.color, -24);
   ctx.stroke();
 
-  if (t.rank === 0) {                       // scalar: inner ring + value
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, r - 5, 0, 2 * Math.PI);
+  if (t.rank === 0) {                       // scalar: inner outline + value
+    bevelRectPath(t.x, t.y, r - 5, Math.max(2, corner - 4));
     ctx.strokeStyle = 'rgba(16,20,26,0.45)';
     ctx.lineWidth = 1;
     ctx.stroke();
@@ -1481,7 +2034,7 @@ function drawTensor(t) {
   ctx.fillStyle = '#10141a';
   if (t.rank === 0) {
     ctx.font = F_MONO;
-    ctx.fillText(fmtNumShort(t.data[0]), t.x, t.y);
+    ctx.fillText(fmtNumShort(t.data ? t.data[0] : (t.value ?? 0)), t.x, t.y);
   } else {
     ctx.font = F_BODY;
     ctx.fillText(t.label, t.x, t.y);
@@ -1507,7 +2060,8 @@ function drawPendingConnection() {
   const a = Math.atan2(m.y - s.y, m.x - s.x), r = radiusOf(s);
   const z = cam.zoom;
   ctx.beginPath();
-  ctx.moveTo(s.x + Math.cos(a) * r, s.y + Math.sin(a) * r);
+  const eg = legAnchor(s.x, s.y, r, a);
+  ctx.moveTo(eg.ax, eg.ay);
   ctx.lineTo(m.x, m.y);
   ctx.strokeStyle = '#7cc6ff';
   ctx.lineWidth = 2.4 / z;
@@ -1593,15 +2147,14 @@ function samePath(a, b) {
 function drawRadial() {
   const hover = radialHitTest(mouse.x, mouse.y);
   const now = performance.now();
-  // hover-to-open: the desired open path is the ancestor chain of the hovered
-  // item, extended by the item itself when it has children. Growing the path
-  // (drilling deeper) applies instantly; collapsing or switching branches
-  // waits out a short grace window so a stray mouse move doesn't close it.
+  // hover-to-open: grace only when the new path is strictly shallower than the
+  // currently open one (L+1 -> L). Drilling deeper and lateral moves at the
+  // same depth (including all root-level moves) apply instantly.
   if (hover && !hover.item.disabled) {
     const desired = radial.openPath.slice(0, hover.ring);
     if (hover.item.children) desired.push(hover.index);
-    const grows = radial.openPath.every((v, i) => desired[i] === v);
-    if (grows) {
+    const collapsing = desired.length < radial.openPath.length;
+    if (!collapsing) {
       radial.openPath = desired;
       radial.gracePath = null;
     } else if (!radial.gracePath || !samePath(radial.gracePath, desired)) {
@@ -1998,9 +2551,30 @@ function onMouseDown(e) {
         drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
       }
     } else {
-      if (!e.shiftKey) { selection = new Set(); selAbs = new Set(); }
-      drag = { mode: 'box', x0: sx, y0: sy, bx0: w.x, by0: w.y,
-               additive: e.shiftKey, base: new Set(selection) };
+      const ab = abstractionAt(w.x, w.y);
+      if (ab) {
+        selection = new Set();
+        if (e.shiftKey) {
+          if (selAbs.has(ab.id)) selAbs.delete(ab.id);
+          else selAbs.add(ab.id);
+        } else {
+          selAbs = new Set([ab.id]);
+        }
+        const movIds = [];
+        for (const aid of selAbs) {
+          const aa = getAbstraction(aid);
+          if (aa) for (const m of aa.members) movIds.push(m);
+        }
+        const moving = movIds.map(id => {
+          const tt = getTensor(id);
+          return tt ? { id, dx: tt.x - w.x, dy: tt.y - w.y } : null;
+        }).filter(Boolean);
+        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+      } else {
+        if (!e.shiftKey) { selection = new Set(); selAbs = new Set(); }
+        drag = { mode: 'box', x0: sx, y0: sy, bx0: w.x, by0: w.y,
+                 additive: e.shiftKey, base: new Set(selection) };
+      }
     }
     updateInfo();
   }
@@ -2089,7 +2663,10 @@ function onMouseUp(e) {
     const cw = screenToWorld(sx, sy);
     drag.path.push(cw);
     const cut = bondsCrossedBy(drag.path);
-    for (const b of cut) cutBond(b);
+    // Snapshot each bond's current multi-lane bulge before any are removed,
+    // so freed legs fan out along the lanes instead of stacking on the centre line.
+    const bulges = cut.map(b => bondGeom(b));
+    for (let i = 0; i < cut.length; i++) cutBond(cut[i], bulges[i]);
     if (cut.length) {
       toast('Cut ' + cut.length + ' connection' + (cut.length === 1 ? '' : 's'));
       updateInfo();
@@ -2194,6 +2771,14 @@ function onKeyDown(e) {
     if (legPopupState) closeLegPopup();
     if (dataWinState) closeDataWindow();
     if (grabbing) cancelGrab();
+  } else if (frames.length && e.code === 'ArrowRight') {
+    e.preventDefault(); applyFrame(frameIndex + 1);
+  } else if (frames.length && e.code === 'ArrowLeft') {
+    e.preventDefault(); applyFrame(frameIndex - 1);
+  } else if (frames.length && e.code === 'Home') {
+    e.preventDefault(); applyFrame(0);
+  } else if (frames.length && e.code === 'End') {
+    e.preventDefault(); applyFrame(frames.length - 1);
   }
 }
 
@@ -2348,6 +2933,26 @@ function init() {
   document.getElementById('lpCancel').addEventListener('click', closeLegPopup);
   document.getElementById('dwBake').addEventListener('click', bakeReshape);
   document.getElementById('dwClose').addEventListener('click', closeDataWindow);
+
+  const folderInput = document.getElementById('folderInput');
+  const fileInput = document.getElementById('fileInput');
+  document.getElementById('loadBtn').addEventListener('click', () => folderInput.click());
+  document.getElementById('loadFileBtn').addEventListener('click', () => fileInput.click());
+  const onPick = e => {
+    if (e.target.files && e.target.files.length) loadFolder(e.target.files);
+    e.target.value = '';
+  };
+  folderInput.addEventListener('change', onPick);
+  fileInput.addEventListener('change', onPick);
+  document.getElementById('fbFirst').addEventListener('click', () => applyFrame(0));
+  document.getElementById('fbPrev').addEventListener('click',  () => applyFrame(frameIndex - 1));
+  document.getElementById('fbNext').addEventListener('click',  () => applyFrame(frameIndex + 1));
+  document.getElementById('fbLast').addEventListener('click',  () => applyFrame(frames.length - 1));
+  document.getElementById('fbClose').addEventListener('click', unloadFrames);
+
+  document.querySelector('#controls h2').addEventListener('click', () => {
+    document.getElementById('controls').classList.toggle('collapsed');
+  });
 
   requestAnimationFrame(render);
 }

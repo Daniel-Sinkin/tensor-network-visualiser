@@ -9,6 +9,7 @@ ITensors = "9136182c-28ba-11e9-034c-db9fb085ebd5"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NDTensors = "23ae76d9-e61a-49c4-8f12-3f1a16adf9cf"
+dans_tn_core = "e0f4d540-2ccb-407f-acff-b57310310eb6"
 
 [compat]
 ITensorMPS = "0.4.1"
