@@ -4,6 +4,7 @@ authors = ["Daniel Sinkin"]
 version = "0.1.0"
 
 [deps]
+HTTP = "cd3eb016-35fb-5094-929b-558a96fad6f3"
 ITensorMPS = "0d1a4710-d33b-49a5-8f18-73bdf49b47e2"
 ITensors = "9136182c-28ba-11e9-034c-db9fb085ebd5"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
@@ -12,6 +13,7 @@ NDTensors = "23ae76d9-e61a-49c4-8f12-3f1a16adf9cf"
 dans_tn_core = "e0f4d540-2ccb-407f-acff-b57310310eb6"
 
 [compat]
+HTTP = "1.11.0"
 ITensorMPS = "0.4.1"
 JSON3 = "1"
 NDTensors = "0.4.27"

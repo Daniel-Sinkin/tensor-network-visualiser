@@ -96,23 +96,19 @@
   }
   #controls .dim-ctl input { width: 56px; }
   #controls .dim-ctl select { width: 86px; }
-  #controls .legend {
-    margin-top: 10px; border-top: 1px solid #2b3340; padding-top: 9px;
-  }
-  #controls .legend-title { color: #7d8aa0; margin-bottom: 6px; font-size: 10.5px;
-    text-transform: uppercase; letter-spacing: 0.06em; }
-  #controls .legend-grid { display: flex; flex-wrap: wrap; gap: 5px 10px; }
-  #controls .legend-item { display: flex; align-items: center; gap: 5px; color: #9aa6b8; }
-  #controls .legend-item .dot {
-    width: 11px; height: 11px; border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.2);
-  }
 
-  #splitPopup, #builder, #legPopup {
+  #splitPopup, #builder, #legPopup, #contractPopup, #renamePopup {
     width: 234px; padding: 13px 15px; font-size: 12px;
     display: none; z-index: 30;
   }
-  #splitPopup.show, #builder.show, #legPopup.show { display: block; }
+  #splitPopup.show, #builder.show, #legPopup.show, #contractPopup.show,
+  #renamePopup.show { display: block; }
+  #renamePopup input {
+    width: 100%; margin-top: 4px;
+    background: #11151c; border: 1px solid #3a4456; border-radius: 5px;
+    color: #e8edf4; padding: 6px 8px; font-size: 12px; font-family: inherit;
+  }
+  #renamePopup input:focus { border-color: #5b8fe6; outline: none; }
   .sp-head { font-size: 12.5px; font-weight: 600; color: #e8edf4; margin-bottom: 3px; }
   .sp-sub { font-size: 10.5px; color: #7d8aa0; line-height: 1.45; margin-bottom: 10px; }
   .sp-legs { display: flex; flex-wrap: wrap; gap: 5px; }
@@ -180,13 +176,37 @@
   #toast.warn { border-color: #c4564a; color: #f0b4ac; }
 
   #log {
-    position: absolute; bottom: 12px; left: 14px;
-    max-width: 480px;
+    position: absolute; bottom: 14px; left: 14px;
+    width: 360px; max-height: 220px; overflow-y: auto;
+    padding: 9px 12px;
+    background: rgba(14, 17, 22, 0.92);
+    border: 1px solid #1f2630;
+    border-left: 3px solid #2b3340;
+    border-radius: 6px;
     font-family: "SF Mono", Menlo, Consolas, monospace;
-    font-size: 11px; line-height: 1.55;
-    color: #6f7c92; white-space: pre-wrap;
+    font-size: 10.5px; line-height: 1.5;
+    color: #8b97a8; white-space: pre-wrap; word-break: break-word;
     pointer-events: none;
+    z-index: 4;
   }
+
+  #notifs {
+    position: absolute; right: 14px; bottom: 14px;
+    display: flex; flex-direction: column-reverse; gap: 6px;
+    pointer-events: none; z-index: 80; max-width: 360px;
+  }
+  .notif {
+    padding: 9px 13px; border-radius: 6px;
+    border-left: 4px solid;
+    background: rgba(28, 34, 44, 0.96);
+    color: #e8edf4; font-size: 12px; line-height: 1.4;
+    transition: opacity 1.4s ease-out, transform 0.2s ease-out;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.45);
+  }
+  .notif.err  { border-left-color: #f06a5e; background: rgba(60, 22, 22, 0.95); color: #f0c5be; }
+  .notif.warn { border-left-color: #f5a23a; background: rgba(60, 40, 22, 0.95); color: #f0d8bc; }
+  .notif.info { border-left-color: #6ec77a; background: rgba(24, 38, 28, 0.95); color: #d2e8d4; }
+  .notif.fade { opacity: 0; }
 
   #framebar {
     position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%);
@@ -196,8 +216,9 @@
   #framebar.show { display: flex; }
   #framebar .fb-btn {
     background: #2b3340; border: 1px solid #3a4456; color: #d6dce5;
-    padding: 4px 9px; border-radius: 5px; cursor: pointer;
-    font-family: inherit; font-size: 12px; min-width: 28px;
+    padding: 4px 0; border-radius: 5px; cursor: pointer;
+    font-family: inherit; font-size: 12px; min-width: 34px;
+    text-align: center; white-space: nowrap; line-height: 1;
   }
   #framebar .fb-btn:hover { background: #353f4f; }
   #framebar .fb-btn:disabled { opacity: 0.45; cursor: default; }
@@ -253,10 +274,6 @@
     <label for="precSel">Precision</label>
     <select id="precSel"><option value="f64">f64</option><option value="f32">f32</option></select>
   </div>
-  <div class="legend">
-    <div class="legend-title">Colour by rank</div>
-    <div class="legend-grid" id="legendGrid"></div>
-  </div>
   <div class="dim-ctl" style="border-top:1px solid #2b3340; padding-top:10px; margin-top:10px; gap:6px">
     <button id="loadFileBtn" class="sp-btn">Load file...</button>
     <button id="loadBtn" class="sp-btn">Load folder...</button>
@@ -305,10 +322,33 @@
   </div>
 </div>
 
+<div id="renamePopup" class="panel">
+  <div class="sp-head" id="rnHead">Rename</div>
+  <div class="sp-sub">Allowed: letters, digits, and <code>_-.*'()[]+</code> space. Non-empty, max 64 chars.</div>
+  <input id="rnInput" type="text" maxlength="64" autocomplete="off" spellcheck="false">
+  <div class="sp-actions">
+    <button id="rnCancel" class="sp-btn">Cancel</button>
+    <button id="rnDo" class="sp-btn sp-primary">Rename</button>
+  </div>
+</div>
+
+<div id="contractPopup" class="panel">
+  <div class="sp-head">Contract</div>
+  <div class="sp-sub">Pick the multiplication order. The result of <b>X &times; Y</b> places X on the left.</div>
+  <div class="sp-ctl"><label>Left operand</label><span id="cpLeftName" class="val" style="color:#e8edf4"></span></div>
+  <div class="sp-ctl"><label>Right operand</label><span id="cpRightName" class="val" style="color:#e8edf4"></span></div>
+  <div class="sp-actions">
+    <button id="cpSwap" class="sp-btn">Swap</button>
+    <button id="cpCancel" class="sp-btn">Cancel</button>
+    <button id="cpDo" class="sp-btn sp-primary">Contract</button>
+  </div>
+</div>
+
 <div id="legPopup" class="panel">
   <div class="sp-head" id="lpHead">Add a leg</div>
-  <div class="sp-sub">Choose the dimension of the new leg.</div>
+  <div class="sp-sub">Dimension + a non-empty name (comma-separated tags).</div>
   <div class="sp-ctl"><label for="lpDim">Dimension</label><input id="lpDim" type="number" min="1" max="64" value="2"></div>
+  <div class="sp-ctl"><label for="lpName">Name</label><input id="lpName" type="text" maxlength="64" placeholder="phys,r1c1" autocomplete="off" spellcheck="false" style="width:118px;background:#11151c;border:1px solid #3a4456;border-radius:5px;color:#e8edf4;padding:4px 7px;font-family:inherit;font-size:12px"></div>
   <div class="sp-actions">
     <button id="lpCancel" class="sp-btn">Cancel</button>
     <button id="lpDo" class="sp-btn sp-primary">Add leg</button>
@@ -329,6 +369,7 @@
 
 <div id="toast"></div>
 <div id="log"></div>
+<div id="notifs"></div>
 
 <div id="descPanel" class="panel">
   <div class="desc-label" id="descLabel"></div>
@@ -373,6 +414,7 @@ let tensors = [];
 let bonds = [];
 let selection = new Set();
 let selAbs = new Set();      // selected abstraction ids (first-class selection)
+let innerSel = null;         // when a container is selected, optionally drill into one of its members
 let nextId = 1, nextLabel = 1, nextBondId = 1, nextLegId = 1;
 let defaultDim = 2;
 const cfg = { complex: false, prec: 'f64' };   // numeric type: real/complex, f32/f64
@@ -384,6 +426,7 @@ let radial = null;           // {cx, cy, items:[{label,color,action,x,y}]}
 let hoverId = null;
 let connectHoverId = null;
 let hoverLeg = null;         // {tensorId, legIndex} of a free-leg tip under the cursor
+let hoverBond = null;        // bond under the cursor (for +/- priming on connected legs)
 let placing = null;          // copy ghost: spec of a tensor awaiting placement
 let splitState = null;       // open split popup: { tid, sideA: Set }
 let clipboard = null;        // Ctrl+C clipboard: { specs, bonds }
@@ -393,7 +436,10 @@ const absCount = { MPS: 0, MPO: 0, PEPS: 0 };
 let builderState = null;     // open builder window: { type, wx, wy }
 let legPopupState = null;    // open add-leg popup: { tid }
 let grabbing = null;         // g-key move: { items:[{id,x0,y0}], ax, ay }
+let qHeld = false;           // hold Q to pan with left-drag (trackpad alternative to middle-drag)
 let dataWinState = null;     // open data window: { tid, perm }
+let contractState = null;    // open contract popup: { left, right } (operands, each { kind, id, name })
+let renameState = null;      // open rename popup: { type: 'tensor' | 'container', id }
 let frames = [];             // loaded replay frames (each a scene snapshot)
 let frameIndex = -1;
 let frameSource = null;
@@ -424,6 +470,21 @@ const RANK_PALETTE = [
   [44, 86, 62], [210, 60, 60], [145, 46, 54], [30, 74, 58],
   [344, 58, 60], [270, 50, 66], [186, 54, 52],
 ];
+// User-requested override (hacked in): all nodes white, leg colors by tag.
+const NODE_HSL = [0, 0, 92];
+const TAG_COLOR = {
+  hlink: '#6ec77a',
+  vlink: '#6fb4ff',
+  phys:  '#f06a5e',
+};
+function legColorFromTags(tags) {
+  if (!tags) return null;
+  for (let i = 0; i < tags.length; i++) {
+    const c = TAG_COLOR[tags[i]];
+    if (c) return c;
+  }
+  return null;
+}
 function rankHSL(r) {
   if (r < RANK_PALETTE.length) return RANK_PALETTE[r];
   return [(r * 53) % 360, 52, 58];
@@ -466,15 +527,47 @@ function fmtNumShort(x) {
 
 let toastTimer = null;
 function toast(msg, warn) {
+  // Errors/warnings live in the bottom-right stack so the top-centre frame
+  // description doesn't bury them. Plain toasts (warn=false) stay as the
+  // transient bottom-centre bubble.
+  if (warn) { notify('err', msg); return; }
   toastEl.textContent = msg;
-  toastEl.className = 'show' + (warn ? ' warn' : '');
+  toastEl.className = 'show';
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { toastEl.className = ''; }, 2600);
 }
+const _notifs = [];
+function notify(level, msg) {
+  const host = document.getElementById('notifs');
+  if (!host) return;
+  const el = document.createElement('div');
+  el.className = 'notif ' + level;
+  el.textContent = msg;
+  host.appendChild(el);
+  const ttl = level === 'err' ? 7000 : level === 'warn' ? 3500 : 2500;
+  const fadeMs = level === 'err' ? 1400 : 900;
+  const item = { el, level };
+  _notifs.push(item);
+  while (_notifs.length > 5) {
+    const old = _notifs.shift();
+    if (old.el && old.el.parentNode) old.el.parentNode.removeChild(old.el);
+  }
+  setTimeout(() => {
+    el.classList.add('fade');
+    setTimeout(() => {
+      const i = _notifs.indexOf(item);
+      if (i !== -1) _notifs.splice(i, 1);
+      if (el.parentNode) el.parentNode.removeChild(el);
+    }, fadeMs);
+  }, ttl);
+}
+function notifyError(msg) { notify('err',  msg); }
+function notifyWarn (msg) { notify('warn', msg); }
+function notifyInfo (msg) { notify('info', msg); }
 const logLines = [];
 function logMsg(s) {
   logLines.push(s);
-  while (logLines.length > 3) logLines.shift();
+  while (logLines.length > 8) logLines.shift();
   logEl.textContent = logLines.join('\n');
 }
 
@@ -487,6 +580,9 @@ function snapshotTensor(t) {
     dims: t.dims.slice(), legAngles: t.legAngles.slice(),
     legPrime: t.legPrime.slice(), legId: t.legId.slice(), color: t.color.slice(),
     data: t.data.slice(), dataIm: t.dataIm ? t.dataIm.slice() : null,
+    _srcInds: t._srcInds ? t._srcInds.map(s => ({
+      id: s.id, plev: s.plev, tags: s.tags ? s.tags.slice() : [],
+    })) : undefined,
   };
 }
 function pushUndo() {
@@ -494,10 +590,11 @@ function pushUndo() {
     tensors: tensors.map(snapshotTensor),
     bonds: bonds.map(b => ({ id: b.id, a: b.a, ai: b.ai, b: b.b, bi: b.bi })),
     abstractions: abstractions.map(a => ({
-      id: a.id, type: a.type, name: a.name, members: a.members.slice() })),
+      id: a.id, type: a.type, name: a.name, members: a.members.slice(),
+      nrows: a.nrows, ncols: a.ncols })),
     nextId, nextLabel, nextBondId, nextLegId, nextAbsId,
     absCount: { MPS: absCount.MPS, MPO: absCount.MPO, PEPS: absCount.PEPS },
-    selection: [...selection], selAbs: [...selAbs],
+    selection: [...selection], selAbs: [...selAbs], innerSel,
   });
   if (undoStack.length > UNDO_CAP) undoStack.shift();
 }
@@ -507,16 +604,18 @@ function undo() {
   tensors = s.tensors.map(snapshotTensor);
   bonds = s.bonds.map(b => ({ id: b.id, a: b.a, ai: b.ai, b: b.b, bi: b.bi }));
   abstractions = s.abstractions.map(a => ({
-    id: a.id, type: a.type, name: a.name, members: a.members.slice() }));
+    id: a.id, type: a.type, name: a.name, members: a.members.slice(),
+    nrows: a.nrows, ncols: a.ncols }));
   nextId = s.nextId; nextLabel = s.nextLabel; nextBondId = s.nextBondId;
   nextLegId = s.nextLegId; nextAbsId = s.nextAbsId;
   absCount.MPS = s.absCount.MPS; absCount.MPO = s.absCount.MPO; absCount.PEPS = s.absCount.PEPS;
   selection = new Set(s.selection);
   selAbs = new Set(s.selAbs);
+  innerSel = (s.innerSel !== undefined) ? s.innerSel : null;
   drag = null; grabbing = null; placing = null;
   updateInfo();
   toast('Undo');
-  logMsg('undo — ' + undoStack.length + ' step(s) left');
+  logMsg('undo - ' + undoStack.length + ' step(s) left');
 }
 
 /* ===================== Geometry ===================== */
@@ -640,6 +739,25 @@ function bestFreeLegToward(t, tx, ty) {
   return best;
 }
 
+// Find a bond whose line passes near a world point (for +/- prime hover).
+function bondAtPoint(wx, wy, threshold) {
+  const th2 = threshold * threshold;
+  for (let k = bonds.length - 1; k >= 0; k--) {
+    const b = bonds[k];
+    const A = getTensor(b.a), B = getTensor(b.b);
+    if (!A || !B) continue;
+    const dx = B.x - A.x, dy = B.y - A.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-9) continue;
+    let tt = ((wx - A.x) * dx + (wy - A.y) * dy) / len2;
+    if (tt < 0) tt = 0; else if (tt > 1) tt = 1;
+    const px = A.x + tt * dx, py = A.y + tt * dy;
+    const d2 = (px - wx) * (px - wx) + (py - wy) * (py - wy);
+    if (d2 <= th2) return b;
+  }
+  return null;
+}
+
 // Find a free-leg tip near a world point (grab zone stays ~constant in screen px).
 function freeLegTipAt(wx, wy) {
   const grab = 11 / cam.zoom;
@@ -665,8 +783,17 @@ function rerollData(t) {
   t.data = randn(n);
   t.dataIm = cfg.complex ? randn(n) : null;
 }
+let nextGenIndexId = 1;
+function generateSrcInds(tid, dims, primes) {
+  return dims.map((_, i) => ({
+    id: 'gen_' + (nextGenIndexId++),
+    plev: (primes && primes[i]) || 0,
+    tags: ['gen', 't' + tid + '-l' + i],
+  }));
+}
 function makeTensorWithDims(x, y, dims) {
   const n = product(dims);
+  const tid = nextId;  // value before increment
   const t = {
     id: nextId++, x, y, rank: dims.length, dims: dims.slice(),
     legAngles: defaultLegAngles(dims.length),
@@ -674,6 +801,7 @@ function makeTensorWithDims(x, y, dims) {
     color: rankHSL(dims.length).slice(),
     data: randn(n), dataIm: cfg.complex ? randn(n) : null,
     label: 'T' + (nextLabel++),
+    _srcInds: generateSrcInds(tid, dims),
   };
   tensors.push(t);
   return t;
@@ -692,11 +820,21 @@ function largestGapAngle(t) {
   }
   return bestMid;
 }
-function addLeg(t, dim) {
+function addLeg(t, dim, tags) {
+  const newIdx = t.rank;
   t.legAngles.push(largestGapAngle(t));
   t.dims.push(dim || defaultDim);
   t.legPrime.push(0);
   t.legId.push(nextLegId++);
+  if (!t._srcInds) {
+    // Backfill _srcInds for the existing legs so this tensor stays uniform.
+    t._srcInds = generateSrcInds(t.id, t.dims.slice(0, newIdx));
+  }
+  t._srcInds.push({
+    id: 'gen_' + (nextGenIndexId++),
+    plev: 0,
+    tags: (tags && tags.length) ? tags.slice() : ['gen', 't' + t.id + '-l' + newIdx],
+  });
   t.rank += 1;
   rerollData(t);
 }
@@ -774,12 +912,33 @@ function copySelection() {
       cbonds.push({ a: idx.get(b.a), ai: b.ai, b: idx.get(b.b), bi: b.bi });
     }
   }
-  clipboard = { specs, bonds: cbonds };
-  toast('Copied ' + ids.length + ' tensor' + (ids.length === 1 ? '' : 's'));
+  let containerSpec = null;
+  if (selAbs.size === 1) {
+    const aid = [...selAbs][0];
+    const ab = getAbstraction(aid);
+    if (ab) {
+      containerSpec = {
+        type: ab.type, name: ab.name,
+        nrows: ab.nrows, ncols: ab.ncols,
+      };
+    }
+  }
+  clipboard = { specs, bonds: cbonds, container: containerSpec };
+  toast('Copied ' + ids.length + ' tensor' + (ids.length === 1 ? '' : 's') +
+        (containerSpec ? ' (as ' + containerSpec.type + ')' : ''));
 }
 function pasteClipboard() {
   if (!clipboard) { toast('Clipboard is empty', true); return; }
   const w = screenToWorld(mouse.x, mouse.y);
+  // Map each original Index id to a fresh one. Two source legs that shared an
+  // Index (i.e., are bonded) still share their NEW id within the copy bundle,
+  // so internal connectivity is preserved; but copies no longer collide with
+  // the originals' Index identity.
+  const idMap = new Map();
+  const freshId = origId => {
+    if (!idMap.has(origId)) idMap.set(origId, 'gen_' + (nextGenIndexId++));
+    return idMap.get(origId);
+  };
   const created = clipboard.specs.map(spec => {
     const t = {
       id: nextId++, x: w.x + spec.dx, y: w.y + spec.dy,
@@ -790,7 +949,9 @@ function pasteClipboard() {
       dataIm: spec.dataIm ? spec.dataIm.slice() : null,
       label: spec.label ? spec.label + '*' : 'T' + (nextLabel++),
       _srcInds: spec.srcInds ? spec.srcInds.map(s => ({
-        id: s.id, plev: s.plev, tags: s.tags ? s.tags.slice() : [],
+        id: freshId(s.id),
+        plev: s.plev,
+        tags: s.tags ? s.tags.slice() : [],
       })) : undefined,
     };
     tensors.push(t);
@@ -799,9 +960,28 @@ function pasteClipboard() {
   for (const cb of clipboard.bonds) {
     bonds.push({ id: nextBondId++, a: created[cb.a].id, ai: cb.ai, b: created[cb.b].id, bi: cb.bi });
   }
-  selection = new Set(created.map(t => t.id));
+  if (clipboard.container) {
+    const c = clipboard.container;
+    const newAb = {
+      id: nextAbsId++,
+      type: c.type,
+      name: (c.name || c.type) + '*',
+      members: created.map(t => t.id),
+      nrows: c.nrows, ncols: c.ncols,
+    };
+    abstractions.push(newAb);
+    for (const t of created) t.absId = newAb.id;
+    selection = new Set();
+    selAbs = new Set([newAb.id]);
+    innerSel = null;
+  } else {
+    selection = new Set(created.map(t => t.id));
+    selAbs = new Set();
+    innerSel = null;
+  }
   updateInfo();
-  toast('Pasted ' + created.length + ' tensor' + (created.length === 1 ? '' : 's'));
+  toast('Pasted ' + created.length + ' tensor' + (created.length === 1 ? '' : 's') +
+        (clipboard.container ? ' (as ' + clipboard.container.type + ')' : ''));
 }
 function cancelGrab() {
   for (const it of grabbing.items) {
@@ -823,27 +1003,79 @@ function placeTensor(spec, x, y) {
   tensors.push(t);
   return t;
 }
+function legTagsKey(ind) {
+  if (!ind || !ind.tags) return '';
+  const tt = ind.tags.slice().sort();
+  return tt.join(',');
+}
+// Two legs "match by name" when their tag set and prime level agree.
+// IDs may differ — that's the case where linking actually unifies two Index objects.
+function legsMatchByName(a, b) {
+  if (!a || !b) return false;
+  if ((a.plev || 0) !== (b.plev || 0)) return false;
+  return legTagsKey(a) === legTagsKey(b);
+}
 function linkTensors(a, b) {
   if (!a || !b) return false;
-  if (a.id === b.id) { toast('Cannot link a tensor to itself', true); return false; }
+  if (a.id === b.id) { notifyError('Cannot link a tensor to itself'); return false; }
+  const usedA = usedLegSet(a.id), usedB = usedLegSet(b.id);
+  // Prefer connecting every matching name-pair at once (ITensors-style).
+  if (a._srcInds && b._srcInds) {
+    const takenB = new Set();
+    const pairs = [];
+    for (let ai = 0; ai < a.rank; ai++) {
+      if (usedA.has(ai)) continue;
+      const aInd = a._srcInds[ai];
+      if (!aInd) continue;
+      for (let bi = 0; bi < b.rank; bi++) {
+        if (usedB.has(bi) || takenB.has(bi)) continue;
+        const bInd = b._srcInds[bi];
+        if (!bInd) continue;
+        if (legsMatchByName(aInd, bInd) && a.dims[ai] === b.dims[bi]) {
+          pairs.push({ ai, bi });
+          takenB.add(bi);
+          break;
+        }
+      }
+    }
+    if (pairs.length === 0) {
+      notifyError('No matching free legs between ' + a.label + ' and ' + b.label);
+      return false;
+    }
+    for (const p of pairs) bonds.push({ id: nextBondId++, a: a.id, ai: p.ai, b: b.id, bi: p.bi });
+    resetBondGroupOffsets(a.id, b.id);
+    return pairs.length;
+  }
+  // Fallback for tensors without _srcInds: legacy single best-direction pairing.
   const ai = bestFreeLegToward(a, b.x, b.y);
   const bi = bestFreeLegToward(b, a.x, a.y);
   if (ai === -1 || bi === -1) {
-    toast('No free leg on ' + (ai === -1 ? a.label : b.label), true);
+    notifyError('No free leg on ' + (ai === -1 ? a.label : b.label));
     return false;
   }
   bonds.push({ id: nextBondId++, a: a.id, ai, b: b.id, bi });
-  return true;
+  resetBondGroupOffsets(a.id, b.id);
+  return 1;
 }
 function connectLegs(A, ai, B, bi) {
-  if (A.id === B.id) { toast('Cannot connect a tensor to itself', true); return false; }
+  if (A.id === B.id) { notifyError('Cannot connect a tensor to itself'); return false; }
   if (A.dims[ai] !== B.dims[bi]) {
-    toast('Leg dims differ: ' + A.dims[ai] + ' vs ' + B.dims[bi], true);
+    notifyError('Leg dims differ: ' + A.dims[ai] + ' vs ' + B.dims[bi]);
     return false;
   }
   const ua = usedLegSet(A.id), ub = usedLegSet(B.id);
-  if (ua.has(ai) || ub.has(bi)) { toast('That leg is already connected', true); return false; }
+  if (ua.has(ai) || ub.has(bi)) { notifyError('That leg is already connected'); return false; }
+  // Require matching index names if both tensors carry source-index metadata.
+  if (A._srcInds && B._srcInds && A._srcInds[ai] && B._srcInds[bi]) {
+    if (!legsMatchByName(A._srcInds[ai], B._srcInds[bi])) {
+      const at = (A._srcInds[ai].tags || []).join(',') || 'leg ' + ai;
+      const bt = (B._srcInds[bi].tags || []).join(',') || 'leg ' + bi;
+      notifyError('Leg names differ: ' + at + ' vs ' + bt);
+      return false;
+    }
+  }
   bonds.push({ id: nextBondId++, a: A.id, ai, b: B.id, bi });
+  resetBondGroupOffsets(A.id, B.id);
   return true;
 }
 function segmentsIntersect(p1, p2, p3, p4) {
@@ -876,6 +1108,7 @@ function cutBond(b, bulge) {
     B.legAngles[b.bi] = Math.atan2(by - B.y, bx - B.x);
   }
   bonds = bonds.filter(x => x.id !== b.id);
+  resetBondGroupOffsets(b.a, b.b);
 }
 function deleteTensors(ids) {
   const set = new Set(ids);
@@ -1074,7 +1307,7 @@ function drawAbstraction(ab) {
   ctx.fillText(ab.name, bb.x + 8, bb.y + 6);
 }
 function buildMPS(N, chi, phys, cx, cy) {
-  const S = 80, x0 = cx - (N - 1) * S / 2, sites = [];
+  const S = 120, x0 = cx - (N - 1) * S / 2, sites = [];
   for (let i = 0; i < N; i++) {
     let dims, angles;
     if (N === 1) { dims = [phys]; angles = [Math.PI / 2]; }
@@ -1090,7 +1323,7 @@ function buildMPS(N, chi, phys, cx, cy) {
   return sites;
 }
 function buildMPO(N, chi, phys, cx, cy) {
-  const S = 80, x0 = cx - (N - 1) * S / 2, sites = [];
+  const S = 120, x0 = cx - (N - 1) * S / 2, sites = [];
   for (let i = 0; i < N; i++) {
     let dims, angles;
     if (N === 1) { dims = [phys, phys]; angles = [-Math.PI / 2, Math.PI / 2]; }
@@ -1106,7 +1339,7 @@ function buildMPO(N, chi, phys, cx, cy) {
   return sites;
 }
 function buildPEPS(R, C, chi, phys, cx, cy) {
-  const S = 86, x0 = cx - (C - 1) * S / 2, y0 = cy - (R - 1) * S / 2;
+  const S = 129, x0 = cx - (C - 1) * S / 2, y0 = cy - (R - 1) * S / 2;
   const am = { up: -Math.PI / 2, down: Math.PI / 2, left: Math.PI, right: 0, phys: -Math.PI / 4 };
   const grid = [], legmap = [];
   for (let r = 0; r < R; r++) {
@@ -1202,6 +1435,15 @@ function _spread(n, center, range) {
   return Array.from({ length: n }, (_, k) =>
     center - range / 2 + range * k / (n - 1));
 }
+function tagDrivenAngle(tags, plev) {
+  if (!tags || !tags.length) return null;
+  if (tags.indexOf('phys') !== -1) {
+    return plev > 0 ? -3 * Math.PI / 4 : Math.PI / 4;
+  }
+  if (tags.indexOf('hlink') !== -1) return 0;
+  if (tags.indexOf('vlink') !== -1) return Math.PI / 2;
+  return null;
+}
 function distributeFreeLegs(t, used, layout) {
   const free = [];
   for (let i = 0; i < t.rank; i++) if (!used.has(i)) free.push(i);
@@ -1224,8 +1466,15 @@ function distributeFreeLegs(t, used, layout) {
     bases = free.map((_, k) => defs[k]);
   }
   for (let k = 0; k < free.length; k++) {
-    const jitter = (rng() - 0.5) * 0.28;
-    t.legAngles[free[k]] = bases[k] + jitter;
+    const li = free[k];
+    const ind = t._srcInds && t._srcInds[li];
+    const tagAng = ind ? tagDrivenAngle(ind.tags, ind.plev || 0) : null;
+    if (tagAng !== null) {
+      t.legAngles[li] = tagAng;
+    } else {
+      const jitter = (rng() - 0.5) * 0.28;
+      t.legAngles[li] = bases[k] + jitter;
+    }
   }
 }
 function assignAnglesByLayout(tensorList, bondList, layout) {
@@ -1344,7 +1593,7 @@ function buildFrame(env, name) {
   if (v === 'Tensor') return frameFromTensorEnv(env, name);
   if (v === 'MPS') return frameFromChainEnv(env, name, 'MPS');
   if (v === 'MPO') return frameFromChainEnv(env, name, 'MPO');
-  if (v === 'PEPS') return frameFromPEPSEnv(env, name);
+  if (v === 'PEPS' || v === 'TensorGrid') return frameFromPEPSEnv(env, name);
   if (v === 'Snapshot') return frameFromSnapshotEnv(env, name);
   if (v === 'Environment') return frameFromEnvironmentEnv(env, name);
   throw new Error('unknown variant: ' + v);
@@ -1400,7 +1649,7 @@ function frameFromSnapshotEnv(env, name) {
     for (const t of sub.frame.tensors) {
       t.id += tidOff;
       t.x += dx; t.y += dy;
-      t.label = sub.name + '.' + t.label;
+      // (label prefix dropped on user request — collisions across abstractions OK)
       t.legId = t.legId.map(l => l + legOff);
       if (t.absId != null) t.absId += aidOff;
       allT.push(t);
@@ -1460,6 +1709,7 @@ function applyFrame(i) {
   nextAbsId = f.nextAbsId;
   selection = new Set();
   selAbs = new Set();
+  innerSel = null;
   drag = null; radial = null; placing = null; grabbing = null;
   if (splitState) closeSplitPopup();
   if (builderState) closeBuilder();
@@ -1647,25 +1897,40 @@ function openLegPopup(sx, sy, tid) {
   legPopupState = { tid };
   const t = getTensor(tid);
   document.getElementById('lpHead').textContent = 'Add a leg to ' + (t ? t.label : '');
+  document.getElementById('lpName').value = '';
   const pop = document.getElementById('legPopup');
   pop.style.left = Math.max(8, Math.min(sx, innerWidth - 252)) + 'px';
-  pop.style.top = Math.max(8, Math.min(sy, innerHeight - 170)) + 'px';
+  pop.style.top = Math.max(8, Math.min(sy, innerHeight - 200)) + 'px';
   pop.classList.add('show');
+  setTimeout(() => { document.getElementById('lpName').focus(); }, 0);
 }
 function closeLegPopup() {
   legPopupState = null;
   document.getElementById('legPopup').classList.remove('show');
 }
+function parseLegName(raw) {
+  if (raw == null) return null;
+  const parts = String(raw).split(',').map(s => s.trim()).filter(Boolean);
+  if (parts.length === 0) return null;
+  for (const p of parts) if (!isValidName(p)) return null;
+  return parts;
+}
 function legPopupAdd() {
   if (!legPopupState) return;
   const t = getTensor(legPopupState.tid);
-  if (t) {
-    const dim = clampInt(document.getElementById('lpDim').value, 1, 64, 2);
-    addLeg(t, dim);
-    updateInfo();
-    toast('Added a leg (dim ' + dim + ') to ' + t.label);
-    logMsg('added leg dim ' + dim + ' to ' + t.label + ' — now rank ' + t.rank);
+  if (!t) { closeLegPopup(); return; }
+  const dim = clampInt(document.getElementById('lpDim').value, 1, 64, 2);
+  const raw = document.getElementById('lpName').value;
+  const tags = parseLegName(raw);
+  if (!tags) {
+    notifyError('Leg name required (comma-separated tags, each valid)');
+    return;
   }
+  pushUndo();
+  addLeg(t, dim, tags);
+  updateInfo();
+  toast('Added leg (' + tags.join(',') + ', dim ' + dim + ') to ' + t.label);
+  logMsg('added leg ' + tags.join(',') + ' dim ' + dim + ' to ' + t.label + ' - now rank ' + t.rank);
   closeLegPopup();
 }
 function openDataWindow(sx, sy, tid) {
@@ -1806,6 +2071,7 @@ function contractSelection(ids, atX, atY) {
   const S = ids.map(getTensor);
   const cx = (atX !== undefined) ? atX : S.reduce((s, t) => s + t.x, 0) / S.length;
   const cy = (atY !== undefined) ? atY : S.reduce((s, t) => s + t.y, 0) / S.length;
+  const newTensorId = nextId;
   const newTensor = {
     id: nextId++, x: cx, y: cy,
     rank: acc.labels.length, dims: acc.dims.slice(),
@@ -1813,6 +2079,7 @@ function contractSelection(ids, atX, atY) {
     legPrime: new Array(acc.labels.length).fill(0), legId: freshLegIds(acc.labels.length),
     color: rankHSL(acc.labels.length).slice(),
     data: acc.data, dataIm: acc.dataIm, label: 'T' + (nextLabel++),
+    _srcInds: generateSrcInds(newTensorId, acc.dims),
   };
 
   // Rewire external bonds onto the new tensor's legs.
@@ -1880,61 +2147,166 @@ function drawGrid() {
   ctx.fill(path);
 }
 
+const BOND_LANE = 32;  // px between auto-spaced multi-bond lanes
 function bondGeom(b) {
   const A = getTensor(b.a), B = getTensor(b.b);
-  const group = bonds.filter(x =>
-    (x.a === b.a && x.b === b.b) || (x.a === b.b && x.b === b.a));
-  group.sort((p, q) => p.id - q.id);
-  const n = group.length;
-  const idx = group.findIndex(x => x.id === b.id);
-  const off = (idx - (n - 1) / 2) * 17;
   const mx = (A.x + B.x) / 2, my = (A.y + B.y) / 2;
   const dx = B.x - A.x, dy = B.y - A.y;
   const len = Math.hypot(dx, dy) || 1;
   const px = -dy / len, py = dx / len;
-  return { A, B, off,
+  let off;
+  if (typeof b.userOff === 'number') {
+    off = b.userOff;
+  } else {
+    const group = bonds.filter(x =>
+      (x.a === b.a && x.b === b.b) || (x.a === b.b && x.b === b.a));
+    group.sort((p, q) => p.id - q.id);
+    const n = group.length;
+    const idx = group.findIndex(x => x.id === b.id);
+    off = (idx - (n - 1) / 2) * BOND_LANE;
+  }
+  return { A, B, off, px, py, mx, my, len,
     bulgeX: mx + px * off, bulgeY: my + py * off,
     ctrlX: mx + px * off * 2, ctrlY: my + py * off * 2 };
+}
+function resetBondGroupOffsets(a, b) {
+  for (const bd of bonds) {
+    if ((bd.a === a && bd.b === b) || (bd.a === b && bd.b === a)) {
+      delete bd.userOff;
+    }
+  }
+}
+// Compute the pill geometry for a bond label in world units. Independent of
+// the current canvas transform — temporarily applies the camera transform
+// while measuring text so measureText returns world widths regardless of
+// when this is called (render-pass or input-handler).
+function bondLabelGeom(b) {
+  const A = getTensor(b.a);
+  if (!A) return null;
+  const ind = A._srcInds && A._srcInds[b.ai];
+  const plev = ind ? (ind.plev || 0)
+                   : ((A.legPrime && A.legPrime[b.ai]) || 0);
+  const lines = (ind && ind.tags && ind.tags.length) ? ind.tags.slice() : [];
+  if (plev > 0) {
+    const ps = plev <= 4 ? "'".repeat(plev) : plev + "'";
+    if (lines.length) lines[lines.length - 1] = lines[lines.length - 1] + ps;
+    else lines.push(ps);
+  }
+  if (lines.length === 0) return null;
+  ctx.save();
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx.transform(cam.zoom, 0, 0, cam.zoom, cam.x, cam.y);
+  ctx.font = F_SMALL;
+  let maxW = 0;
+  for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
+  ctx.restore();
+  const lineH = 11, padX = 8, padY = 3;
+  return {
+    lines, lineH, padX, padY,
+    pw: maxW + 2 * padX,
+    ph: lines.length * lineH + 2 * padY,
+  };
+}
+function bondLabelAt(wx, wy) {
+  for (let k = bonds.length - 1; k >= 0; k--) {
+    const b = bonds[k];
+    const A = getTensor(b.a), B = getTensor(b.b);
+    if (!A || !B) continue;
+    const bg = bondGeom(b);
+    const geom = bondLabelGeom(b);
+    if (!geom) continue;
+    if (Math.abs(wx - bg.bulgeX) <= geom.pw / 2 &&
+        Math.abs(wy - bg.bulgeY) <= geom.ph / 2) {
+      return b;
+    }
+  }
+  return null;
+}
+// Hit-test a free leg's text label (mirrors the geometry drawFreeLegs uses).
+function freeLegLabelAt(wx, wy) {
+  for (let k = tensors.length - 1; k >= 0; k--) {
+    const t = tensors[k];
+    const used = usedLegSet(t.id);
+    const r = radiusOf(t);
+    for (let i = 0; i < t.rank; i++) {
+      if (used.has(i)) continue;
+      const ind = t._srcInds && t._srcInds[i];
+      if (!ind) continue;
+      const lines = ind.tags && ind.tags.length ? ind.tags.slice() : [];
+      const plev = ind.plev || 0;
+      if (plev > 0) {
+        const ps = plev <= 4 ? "'".repeat(plev) : plev + "'";
+        if (lines.length) lines[lines.length - 1] = lines[lines.length - 1] + ps;
+        else lines.push(ps);
+      }
+      if (lines.length === 0) continue;
+      const a = legAngle(t, i);
+      const anc = legAnchor(t.x, t.y, r, a);
+      const x2 = anc.ax + anc.nx * LEG_STUB;
+      const y2 = anc.ay + anc.ny * LEG_STUB;
+      ctx.save();
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+      ctx.transform(cam.zoom, 0, 0, cam.zoom, cam.x, cam.y);
+      ctx.font = F_SMALL;
+      let maxW = 0;
+      for (const l of lines) maxW = Math.max(maxW, ctx.measureText(l).width);
+      ctx.restore();
+      const lineH = 11;
+      const totalH = lines.length * lineH;
+      const baseX = x2 + anc.nx * 7;
+      const baseY = y2 + anc.ny * 7;
+      let minX, maxX, minY, maxY;
+      if (anc.nx > 0)      { minX = baseX;          maxX = baseX + maxW; }
+      else if (anc.nx < 0) { minX = baseX - maxW;   maxX = baseX; }
+      else                 { minX = baseX - maxW/2; maxX = baseX + maxW/2; }
+      if (anc.ny < 0)      { minY = baseY - totalH; maxY = baseY; }
+      else if (anc.ny > 0) { minY = baseY;          maxY = baseY + totalH; }
+      else                 { minY = baseY - totalH/2; maxY = baseY + totalH/2; }
+      if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) {
+        return { tensor: t, legIndex: i };
+      }
+    }
+  }
+  return null;
 }
 function drawBond(b) {
   const A = getTensor(b.a), B = getTensor(b.b);
   if (!A || !B) return;
   const bg = bondGeom(b);
+  const ind = A._srcInds && A._srcInds[b.ai];
+  const tagCol = ind && legColorFromTags(ind.tags);
+  const plev = ind ? (ind.plev || 0) : ((A.legPrime && A.legPrime[b.ai]) || 0);
   ctx.beginPath();
   ctx.moveTo(A.x, A.y);
   if (bg.off === 0) ctx.lineTo(B.x, B.y);
   else ctx.quadraticCurveTo(bg.ctrlX, bg.ctrlY, B.x, B.y);
-  if (colKey(A.color) === colKey(B.color)) {
-    ctx.strokeStyle = colL(A.color, -4);
-  } else {
-    const g = ctx.createLinearGradient(A.x, A.y, B.x, B.y);
-    g.addColorStop(0, colStr(A.color));
-    g.addColorStop(1, colStr(B.color));
-    ctx.strokeStyle = g;
-  }
+  ctx.strokeStyle = tagCol || '#aab6c8';
   ctx.lineWidth = 3;
+  if (plev > 0) ctx.setLineDash([3, 3]);
   ctx.stroke();
+  if (plev > 0) ctx.setLineDash([]);
 
-  // bond name pill at the bulge point (tags + prime, shared by both endpoints)
-  const ind = A._srcInds && A._srcInds[b.ai];
-  const tags = (ind && ind.tags && ind.tags.length) ? ind.tags.join(',') : '';
-  const p = (A.legPrime && A.legPrime[b.ai]) || 0;
-  const primeStr = p > 0 ? (p <= 4 ? "'".repeat(p) : p + "'") : '';
-  const txt = tags + primeStr;
-  if (txt) {
+  // bond name pill at the bulge point (one line per tag, prime stays on the last).
+  // Drawn as a square box so the entire pill is the grabber (hit-test in
+  // bondLabelAt uses the same geometry).
+  const geom = bondLabelGeom(b);
+  if (geom) {
     const mx = bg.bulgeX, my = bg.bulgeY;
-    ctx.font = F_SMALL;
-    const pw = ctx.measureText(txt).width + 10;
-    pillPath(mx - pw / 2, my - 7, pw, 14, 5);
+    ctx.beginPath();
+    ctx.rect(mx - geom.pw / 2, my - geom.ph / 2, geom.pw, geom.ph);
     ctx.fillStyle = '#1b2330';
     ctx.fill();
     ctx.strokeStyle = '#33405a';
     ctx.lineWidth = 1;
     ctx.stroke();
     ctx.fillStyle = '#c8d2e0';
+    ctx.font = F_SMALL;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(txt, mx, my + 0.5);
+    const startY = my - (geom.lines.length - 1) * geom.lineH / 2;
+    for (let k = 0; k < geom.lines.length; k++) {
+      ctx.fillText(geom.lines[k], mx, startY + k * geom.lineH);
+    }
   }
 }
 
@@ -1953,12 +2325,17 @@ function drawFreeLegs(t, used) {
     const x1 = anc.ax, y1 = anc.ay;
     const x2 = anc.ax + anc.nx * LEG_STUB, y2 = anc.ay + anc.ny * LEG_STUB;
     const active = legIsActive(t.id, i);
+    const ind = t._srcInds && t._srcInds[i];
+    const tagCol = ind && legColorFromTags(ind.tags);
+    const plev = (t.legPrime && t.legPrime[i]) || 0;
     ctx.beginPath();
     ctx.moveTo(x1, y1);
     ctx.lineTo(x2, y2);
-    ctx.strokeStyle = active ? '#ffffff' : colL(t.color, -8);
+    ctx.strokeStyle = active ? '#ffffff' : (tagCol || '#aab6c8');
     ctx.lineWidth = active ? 3 : 2;
+    if (plev > 0) ctx.setLineDash([3, 3]);
     ctx.stroke();
+    if (plev > 0) ctx.setLineDash([]);
     if (active) {
       ctx.beginPath();
       ctx.arc(x2, y2, 6, 0, 2 * Math.PI);
@@ -1970,19 +2347,41 @@ function drawFreeLegs(t, used) {
     ctx.fillStyle = active ? '#ffffff' : colL(t.color, 10);
     ctx.fill();
     const tagSrc = t._srcInds && t._srcInds[i] && t._srcInds[i].tags;
-    const tagStr = (tagSrc && tagSrc.length) ? tagSrc.join(',') : '';
-    const p = (t.legPrime && t.legPrime[i] > 0) ? t.legPrime[i] : 0;
-    const primeStr = p > 0 ? (p <= 4 ? "'".repeat(p) : p + "'") : '';
-    const label = tagStr + primeStr;
-    if (label) {
-      const lx = x2 + anc.nx * 7;
-      const ly = y2 + anc.ny * 7;
+    const pp = (t.legPrime && t.legPrime[i] > 0) ? t.legPrime[i] : 0;
+    const primeStr2 = pp > 0 ? (pp <= 4 ? "'".repeat(pp) : pp + "'") : '';
+    const lines = (tagSrc && tagSrc.length) ? tagSrc.slice() : [];
+    if (primeStr2) {
+      if (lines.length) lines[lines.length - 1] = lines[lines.length - 1] + primeStr2;
+      else lines.push(primeStr2);
+    }
+    if (lines.length) {
+      const baseX = x2 + anc.nx * 7;
+      const baseY = y2 + anc.ny * 7;
       ctx.fillStyle = '#c8d2e0';
       ctx.font = F_SMALL;
-      const right = anc.nx >= 0;
-      ctx.textAlign = anc.nx === 0 ? 'center' : (right ? 'left' : 'right');
-      ctx.textBaseline = anc.ny < 0 ? 'bottom' : (anc.ny > 0 ? 'top' : 'middle');
-      ctx.fillText(label, lx, ly);
+      ctx.textAlign = anc.nx === 0 ? 'center' : (anc.nx > 0 ? 'left' : 'right');
+      const lineH = 11;
+      if (anc.ny < 0) {
+        // leg points up; stack lines upward (last line nearest the tip)
+        ctx.textBaseline = 'bottom';
+        for (let k = 0; k < lines.length; k++) {
+          const y = baseY - (lines.length - 1 - k) * lineH;
+          ctx.fillText(lines[k], baseX, y);
+        }
+      } else if (anc.ny > 0) {
+        // leg points down; stack lines downward (first line nearest the tip)
+        ctx.textBaseline = 'top';
+        for (let k = 0; k < lines.length; k++) {
+          ctx.fillText(lines[k], baseX, baseY + k * lineH);
+        }
+      } else {
+        // horizontal leg; centre the block vertically
+        ctx.textBaseline = 'middle';
+        const startY = baseY - (lines.length - 1) * lineH / 2;
+        for (let k = 0; k < lines.length; k++) {
+          ctx.fillText(lines[k], baseX, startY + k * lineH);
+        }
+      }
     }
   }
 }
@@ -2001,7 +2400,7 @@ function bevelRectPath(cx, cy, halfSize, corner) {
 }
 function drawTensor(t) {
   const r = radiusOf(t);
-  const sel = selection.has(t.id);
+  const sel = selection.has(t.id) || innerSel === t.id;
   const hov = hoverId === t.id;
   const cHov = connectHoverId === t.id;
   const corner = Math.max(4, r * 0.32);
@@ -2012,14 +2411,15 @@ function drawTensor(t) {
     ctx.fill();
   }
 
+  const nc = NODE_HSL;
   const grad = ctx.createLinearGradient(t.x - r, t.y - r, t.x + r, t.y + r);
-  grad.addColorStop(0, colL(t.color, hov || cHov ? 20 : 12));
-  grad.addColorStop(1, colL(t.color, hov || cHov ? 2 : -7));
+  grad.addColorStop(0, colL(nc, hov || cHov ? 4 : 0));
+  grad.addColorStop(1, colL(nc, hov || cHov ? -6 : -14));
   bevelRectPath(t.x, t.y, r, corner);
   ctx.fillStyle = grad;
   ctx.fill();
   ctx.lineWidth = sel ? 3 : 1.5;
-  ctx.strokeStyle = sel ? '#ffffff' : colL(t.color, -24);
+  ctx.strokeStyle = sel ? '#ffffff' : colL(nc, -40);
   ctx.stroke();
 
   if (t.rank === 0) {                       // scalar: inner outline + value
@@ -2037,8 +2437,46 @@ function drawTensor(t) {
     ctx.fillText(fmtNumShort(t.data ? t.data[0] : (t.value ?? 0)), t.x, t.y);
   } else {
     ctx.font = F_BODY;
-    ctx.fillText(t.label, t.x, t.y);
+    const maxW = 2 * r - 6;
+    const lines = wrapLabelToBox(t.label || '', maxW, 4);
+    const lineH = 12;
+    const startY = t.y - (lines.length - 1) * lineH / 2;
+    for (let k = 0; k < lines.length; k++) {
+      ctx.fillText(lines[k], t.x, startY + k * lineH);
+    }
   }
+}
+// Wrap an arbitrary label to lines that fit within maxW (current ctx.font),
+// breaking on character boundaries. If the text overflows maxLines, the last
+// rendered line ends with "<...>" truncated to fit.
+function wrapLabelToBox(text, maxW, maxLines) {
+  if (!text) return [''];
+  if (ctx.measureText(text).width <= maxW) return [text];
+  const lines = [];
+  let rem = text;
+  while (rem.length > 0 && lines.length < maxLines) {
+    let lo = 1, hi = rem.length, best = 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (ctx.measureText(rem.slice(0, mid)).width <= maxW) { best = mid; lo = mid + 1; }
+      else hi = mid - 1;
+    }
+    if (lines.length === maxLines - 1 && best < rem.length) {
+      const suffix = '<...>';
+      let lo2 = 0, hi2 = best, fit = 0;
+      while (lo2 <= hi2) {
+        const mid = (lo2 + hi2) >> 1;
+        if (ctx.measureText(rem.slice(0, mid) + suffix).width <= maxW) {
+          fit = mid; lo2 = mid + 1;
+        } else hi2 = mid - 1;
+      }
+      lines.push(rem.slice(0, fit) + suffix);
+      break;
+    }
+    lines.push(rem.slice(0, best));
+    rem = rem.slice(best);
+  }
+  return lines;
 }
 function drawGhost() {
   const w = screenToWorld(mouse.x, mouse.y);
@@ -2288,6 +2726,387 @@ function closeSplitPopup() {
   splitState = null;
   document.getElementById('splitPopup').classList.remove('show');
 }
+function getContractOperands() {
+  const ops = [];
+  for (const aid of selAbs) {
+    const ab = getAbstraction(aid);
+    if (ab) ops.push({ kind: 'container', id: aid, name: ab.name || ab.type });
+  }
+  for (const tid of selection) {
+    const t = getTensor(tid);
+    if (t && t.absId == null) ops.push({ kind: 'tensor', id: tid, name: t.label });
+  }
+  return ops;
+}
+function openContractPopup(ops) {
+  if (ops.length !== 2) {
+    toast('Select exactly two things to contract', true);
+    return;
+  }
+  contractState = { left: ops[0], right: ops[1] };
+  renderContractPopup();
+  const pop = document.getElementById('contractPopup');
+  pop.style.left = Math.max(8, Math.min(mouse.x, innerWidth - 252)) + 'px';
+  pop.style.top  = Math.max(8, Math.min(mouse.y, innerHeight - 220)) + 'px';
+  pop.classList.add('show');
+}
+function renderContractPopup() {
+  if (!contractState) return;
+  document.getElementById('cpLeftName').textContent = contractState.left.name;
+  document.getElementById('cpRightName').textContent = contractState.right.name;
+}
+function closeContractPopup() {
+  contractState = null;
+  document.getElementById('contractPopup').classList.remove('show');
+}
+const ITENSORS_SERVER = 'http://127.0.0.1:8754';
+function tensorContentEnvelope(t) {
+  const indices = [];
+  for (let i = 0; i < t.rank; i++) {
+    const s = t._srcInds && t._srcInds[i];
+    indices.push({
+      id: (s && s.id) ? String(s.id) : ('synth_' + t.id + '_' + i),
+      dim: t.dims[i],
+      tags: (s && s.tags) ? s.tags.slice() : [],
+      plev: (s && typeof s.plev === 'number') ? s.plev : ((t.legPrime && t.legPrime[i]) || 0),
+    });
+  }
+  const isComplex = !!t.dataIm;
+  const eltype = isComplex ? 'ComplexF64' : 'Float64';
+  let data;
+  if (isComplex) {
+    const n = t.data.length;
+    data = new Array(2 * n);
+    for (let i = 0; i < n; i++) { data[2*i] = t.data[i]; data[2*i+1] = t.dataIm[i]; }
+  } else {
+    data = Array.from(t.data);
+  }
+  return { eltype, indices, data_order: 'col_major', data };
+}
+function tensorEnvelopeFor(t) {
+  return { version: 1, variant: 'Tensor', content: tensorContentEnvelope(t) };
+}
+function containerToChainEnvelope(ab) {
+  const v = (ab.type === 'MPS' || ab.type === 'Environment') ? 'MPS' : 'MPO';
+  return {
+    version: 1,
+    variant: v,
+    content: {
+      length: ab.members.length,
+      llim: 0,
+      rlim: ab.members.length,
+      tensors: ab.members.map(id => tensorEnvelopeFor(getTensor(id))),
+    },
+  };
+}
+async function contractViaJulia(leftId, rightId, order) {
+  const La = getAbstraction(leftId), Ra = getAbstraction(rightId);
+  if (!La || !Ra) { toast('Container missing', true); return; }
+  const leftEnv  = containerToChainEnvelope(La);
+  const rightEnv = containerToChainEnvelope(Ra);
+  let env;
+  try {
+    const resp = await fetch(ITENSORS_SERVER + '/contract', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ left: leftEnv, right: rightEnv, order: order || 'lr' }),
+    });
+    if (!resp.ok) {
+      const txt = await resp.text();
+      throw new Error('HTTP ' + resp.status + ': ' + txt);
+    }
+    env = await resp.json();
+  } catch (err) {
+    toast('Julia server unreachable (' + err.message + ') - using JS fallback', true);
+    contractChains(leftId, rightId);
+    return;
+  }
+  pushUndo();
+  const f = buildFrame(env, La.name + ' x ' + Ra.name);
+  // Position the new chain below the operands and merge into the live scene.
+  const ay = La.members.map(getTensor).reduce((s, t) => s + t.y, 0) / La.members.length;
+  const by = Ra.members.map(getTensor).reduce((s, t) => s + t.y, 0) / Ra.members.length;
+  const ax = La.members.map(getTensor).reduce((s, t) => s + t.x, 0) / La.members.length;
+  const bx = Ra.members.map(getTensor).reduce((s, t) => s + t.x, 0) / Ra.members.length;
+  const targetCx = (ax + bx) / 2;
+  const targetCy = Math.max(ay, by) + 260;
+  const ftCx = f.tensors.reduce((s, t) => s + t.x, 0) / f.tensors.length;
+  const ftCy = f.tensors.reduce((s, t) => s + t.y, 0) / f.tensors.length;
+  const dx = targetCx - ftCx, dy = targetCy - ftCy;
+  const idMap = new Map();
+  const newTs = f.tensors.map(t => {
+    const newT = {
+      id: nextId++,
+      label: t.label,
+      x: t.x + dx, y: t.y + dy,
+      rank: t.rank,
+      dims: t.dims.slice(),
+      legAngles: t.legAngles.slice(),
+      legPrime: t.legPrime.slice(),
+      legId: freshLegIds(t.rank),
+      color: t.color.slice(),
+      data: t.data, dataIm: t.dataIm,
+      _srcInds: t._srcInds,
+    };
+    idMap.set(t.id, newT.id);
+    tensors.push(newT);
+    return newT;
+  });
+  for (const b of f.bonds) {
+    bonds.push({ id: nextBondId++, a: idMap.get(b.a), ai: b.ai, b: idMap.get(b.b), bi: b.bi });
+  }
+  const fType = (f.abstractions[0] && f.abstractions[0].type) || 'MPO';
+  const newAb = {
+    id: nextAbsId++,
+    type: fType,
+    name: La.name + ' x ' + Ra.name,
+    members: newTs.map(t => t.id),
+  };
+  abstractions.push(newAb);
+  for (const t of newTs) t.absId = newAb.id;
+  selAbs = new Set([newAb.id]);
+  selection = new Set();
+  innerSel = null;
+  updateInfo();
+  toast('ITensors contracted -> ' + newAb.name);
+  logMsg('itensors-contracted ' + La.name + ' x ' + Ra.name + ' -> ' + newTs.length + ' sites');
+}
+function performContract() {
+  if (!contractState) return;
+  const { left, right } = contractState;
+  closeContractPopup();
+  // Tensor-tensor contraction goes through the existing engine.
+  if (left.kind === 'tensor' && right.kind === 'tensor') {
+    pushUndo();
+    contractSelection([left.id, right.id]);
+    updateInfo();
+    return;
+  }
+  if (left.kind === 'container' && right.kind === 'container') {
+    // Route container chains through Julia ITensors; JS contractChains is the fallback.
+    contractViaJulia(left.id, right.id, 'lr');
+    return;
+  }
+  // Mixed tensor/container: fall back to flat all-members contraction (loud, not silent).
+  const allIds = [];
+  if (left.kind === 'container') {
+    const ab = getAbstraction(left.id);
+    if (ab) allIds.push(...ab.members);
+  } else allIds.push(left.id);
+  if (right.kind === 'container') {
+    const ab = getAbstraction(right.id);
+    if (ab) allIds.push(...ab.members);
+  } else allIds.push(right.id);
+  if (allIds.length < 2) { toast('Nothing to contract', true); return; }
+  pushUndo();
+  contractSelection(allIds);
+  updateInfo();
+}
+function contractChains(leftId, rightId) {
+  const La = getAbstraction(leftId);
+  const Ra = getAbstraction(rightId);
+  if (!La || !Ra) { toast('Container missing', true); return; }
+  const Lm = La.members.map(getTensor).filter(Boolean);
+  const Rm = Ra.members.map(getTensor).filter(Boolean);
+  if (Lm.length !== Rm.length) {
+    toast('Chain lengths differ: ' + Lm.length + ' vs ' + Rm.length, true);
+    return;
+  }
+  const N = Lm.length;
+  if (N === 0) { toast('Empty chain', true); return; }
+  for (let i = 0; i < N; i++) {
+    if (!Lm[i]._srcInds || !Rm[i]._srcInds) {
+      toast('Site ' + i + ': cannot contract, source index info missing', true);
+      return;
+    }
+  }
+  const keyOf = s => s.id + '|' + s.plev;
+  // Site-wise contraction.
+  pushUndo();
+  const newSites = [];
+  for (let i = 0; i < N; i++) {
+    const L = Lm[i], R = Rm[i];
+    const Lkeys = L._srcInds.map(keyOf);
+    const Rkeys = R._srcInds.map(keyOf);
+    const Lset = new Set(Lkeys);
+    const Rset = new Set(Rkeys);
+    const Llabels = Lkeys.map((k, idx) => Rset.has(k) ? 's_' + k : 'L' + i + '_' + idx);
+    const Rlabels = Rkeys.map((k, idx) => Lset.has(k) ? 's_' + k : 'R' + i + '_' + idx);
+    if (!Llabels.some(lab => lab.startsWith('s_'))) {
+      toast('Site ' + i + ' has no shared indices between operands', true);
+      return;
+    }
+    let acc;
+    try {
+      acc = contractTwo(
+        { labels: Llabels, dims: L.dims, data: L.data, dataIm: L.dataIm },
+        { labels: Rlabels, dims: R.dims, data: R.data, dataIm: R.dataIm },
+      );
+    } catch (err) {
+      toast('Site ' + i + ' contraction failed: ' + err.message, true);
+      return;
+    }
+    const resInds = acc.labels.map(lab => {
+      const li = Llabels.indexOf(lab);
+      if (li !== -1) {
+        const s = L._srcInds[li];
+        return { id: s.id, plev: s.plev, tags: s.tags ? s.tags.slice() : [] };
+      }
+      const ri = Rlabels.indexOf(lab);
+      if (ri !== -1) {
+        const s = R._srcInds[ri];
+        return { id: s.id, plev: s.plev, tags: s.tags ? s.tags.slice() : [] };
+      }
+      return { id: lab, plev: 0, tags: [] };
+    });
+    newSites.push({ acc, resInds, L, R });
+  }
+  // Place the result chain below the operands.
+  const ay = Lm.reduce((s, t) => s + t.y, 0) / N;
+  const by = Rm.reduce((s, t) => s + t.y, 0) / N;
+  const cx = (Lm.reduce((s, t) => s + t.x, 0) / N + Rm.reduce((s, t) => s + t.x, 0) / N) / 2;
+  const cy = Math.max(ay, by) + 240;
+  const spacing = 130;
+  const x0 = cx - (N - 1) * spacing / 2;
+  const newTensors = newSites.map((site, i) => {
+    const r = site.acc.labels.length;
+    const t = {
+      id: nextId++,
+      label: 'C' + (i + 1),
+      x: x0 + i * spacing, y: cy,
+      rank: r,
+      dims: site.acc.dims.slice(),
+      legAngles: defaultLegAngles(r),
+      legPrime: site.resInds.map(s => s.plev),
+      legId: freshLegIds(r),
+      color: rankHSL(r).slice(),
+      data: site.acc.data, dataIm: site.acc.dataIm,
+      _srcInds: site.resInds,
+    };
+    tensors.push(t);
+    return t;
+  });
+  nextLabel += N;
+  // Detect bonds and lay out angles.
+  const { bonds: newBonds, nextBondId: nbid } = detectBondsFromIndices(newTensors, nextBondId);
+  for (const b of newBonds) bonds.push(b);
+  nextBondId = nbid;
+  assignAnglesByLayout(newTensors, newBonds, 'MPS');
+  // Wrap in a new abstraction.
+  const newAb = {
+    id: nextAbsId++,
+    type: La.type === Ra.type ? La.type : 'Chain',
+    name: La.name + ' x ' + Ra.name,
+    members: newTensors.map(t => t.id),
+  };
+  abstractions.push(newAb);
+  for (const t of newTensors) t.absId = newAb.id;
+  selAbs = new Set([newAb.id]);
+  selection = new Set();
+  innerSel = null;
+  updateInfo();
+  toast('Contracted ' + La.name + ' x ' + Ra.name + ' -> ' + newAb.name);
+  logMsg('contracted ' + La.name + ' x ' + Ra.name + ' -> ' + N + ' sites, ' + newBonds.length + ' bonds');
+}
+const RENAME_RE = /^[A-Za-z0-9_\-.*'()\[\]+ ]+$/;
+function isValidName(s) {
+  if (s == null) return false;
+  const trimmed = s.trim();
+  if (!trimmed) return false;
+  if (trimmed.length > 64) return false;
+  if (trimmed !== s) return false; // no leading/trailing whitespace
+  return RENAME_RE.test(s);
+}
+function openRenamePopup(type, id, sx, sy, extra) {
+  if (splitState) closeSplitPopup();
+  if (builderState) closeBuilder();
+  if (legPopupState) closeLegPopup();
+  if (dataWinState) closeDataWindow();
+  if (contractState) closeContractPopup();
+  radial = null;
+  let current = '', head = 'Rename';
+  if (type === 'tensor') {
+    const t = getTensor(id);
+    if (!t) return;
+    current = t.label || '';
+    head = 'Rename tensor';
+  } else if (type === 'container') {
+    const ab = getAbstraction(id);
+    if (!ab) return;
+    current = ab.name || '';
+    head = 'Rename container';
+  } else if (type === 'leg-free') {
+    const t = getTensor(extra.tensorId);
+    if (!t || !t._srcInds || !t._srcInds[extra.legIndex]) return;
+    current = (t._srcInds[extra.legIndex].tags || []).join(',');
+    head = 'Rename leg';
+  } else if (type === 'leg-bond') {
+    const b = bonds.find(bd => bd.id === extra.bondId);
+    if (!b) return;
+    const A = getTensor(b.a);
+    if (!A || !A._srcInds || !A._srcInds[b.ai]) return;
+    current = (A._srcInds[b.ai].tags || []).join(',');
+    head = 'Rename shared leg';
+  } else {
+    return;
+  }
+  renameState = { type, id, extra };
+  document.getElementById('rnHead').textContent = head;
+  const pop = document.getElementById('renamePopup');
+  pop.style.left = Math.max(8, Math.min(sx, innerWidth - 252)) + 'px';
+  pop.style.top  = Math.max(8, Math.min(sy, innerHeight - 180)) + 'px';
+  pop.classList.add('show');
+  const inp = document.getElementById('rnInput');
+  inp.value = current;
+  setTimeout(() => { inp.focus(); inp.select(); }, 0);
+}
+function closeRenamePopup() {
+  renameState = null;
+  document.getElementById('renamePopup').classList.remove('show');
+}
+function performRename() {
+  if (!renameState) return;
+  const inp = document.getElementById('rnInput');
+  const v = inp.value;
+  if (renameState.type === 'leg-free' || renameState.type === 'leg-bond') {
+    const tags = parseLegName(v);
+    if (!tags) {
+      notifyError('Invalid leg name (comma-separated tags, each valid; no leading/trailing space)');
+      return;
+    }
+    pushUndo();
+    if (renameState.type === 'leg-free') {
+      const t = getTensor(renameState.extra.tensorId);
+      if (t && t._srcInds && t._srcInds[renameState.extra.legIndex]) {
+        t._srcInds[renameState.extra.legIndex].tags = tags.slice();
+      }
+    } else {
+      const b = bonds.find(bd => bd.id === renameState.extra.bondId);
+      if (b) {
+        const A = getTensor(b.a), B = getTensor(b.b);
+        if (A && A._srcInds && A._srcInds[b.ai]) A._srcInds[b.ai].tags = tags.slice();
+        if (B && B._srcInds && B._srcInds[b.bi]) B._srcInds[b.bi].tags = tags.slice();
+      }
+    }
+    closeRenamePopup();
+    updateInfo();
+    return;
+  }
+  if (!isValidName(v)) {
+    notifyError('Invalid name (allowed: letters, digits, _-.*\\\'()[]+ space; 1-64 chars; no leading/trailing space)');
+    return;
+  }
+  pushUndo();
+  if (renameState.type === 'tensor') {
+    const t = getTensor(renameState.id);
+    if (t) t.label = v;
+  } else if (renameState.type === 'container') {
+    const ab = getAbstraction(renameState.id);
+    if (ab) ab.name = v;
+  }
+  closeRenamePopup();
+  updateInfo();
+}
 function performSplit() {
   if (!splitState) return;
   const t = getTensor(splitState.tid);
@@ -2366,15 +3185,14 @@ function openAddRadial(x, y) {
       ],
     });
   }
-  if (tgt.length >= 2) {
-    items.push({
-      label: 'Contract', color: [280, 55, 64],
-      action: () => {
-        const w = screenToWorld(x, y);
-        contractSelection(tgt, w.x, w.y);
-        updateInfo();
-      },
-    });
+  {
+    const ops = getContractOperands();
+    if (ops.length === 2) {
+      items.push({
+        label: 'Contract', color: [280, 55, 64],
+        action: () => { openContractPopup(ops); },
+      });
+    }
   }
   if (selection.size >= 2) {
     const ids = [...selection];
@@ -2389,6 +3207,34 @@ function openAddRadial(x, y) {
       ],
     });
   }
+  radial = buildRadial(x, y, items);
+}
+function openContainerRadial(x, y, absId) {
+  const ab = getAbstraction(absId);
+  if (!ab) return;
+  selAbs = new Set([absId]);
+  selection = new Set();
+  innerSel = null;
+  updateInfo();
+  const items = [
+    { label: 'Del', color: [344, 58, 60], action: () => {
+        const members = ab.members.slice();
+        deleteTensors(members); updateInfo();
+        toast('Deleted ' + (ab.name || 'container'));
+      } },
+    { label: 'Roll', color: [210, 60, 60], action: () => {
+        for (const id of ab.members) { const tt = getTensor(id); if (tt) rerollData(tt); }
+        toast('Re-rolled ' + (ab.name || 'container'));
+      } },
+    { label: 'Copy', color: [145, 46, 54], action: () => {
+        copySelection();
+      } },
+    { label: 'Ungroup', color: [200, 46, 58], action: () => {
+        dissolveAbstraction(absId);
+        updateInfo();
+        toast('Ungrouped ' + (ab.name || 'container'));
+      } },
+  ];
   radial = buildRadial(x, y, items);
 }
 function openTensorRadial(x, y, tid) {
@@ -2422,13 +3268,6 @@ function openTensorRadial(x, y, tid) {
             toast('Unprimed ' + t.label); logMsg('unprimed all legs of ' + t.label); } },
     ] },
   ];
-  if (t.absId != null) {
-    items.push({ label: 'Ungroup', color: [200, 46, 58], action: () => {
-      const ab = getAbstraction(t.absId);
-      dissolveAbstraction(t.absId);
-      toast('Dissolved ' + (ab ? ab.name : 'abstraction'));
-    } });
-  }
   radial = buildRadial(x, y, items);
 }
 
@@ -2454,6 +3293,8 @@ function onMouseDown(e) {
   if (builderState) { closeBuilder(); return; }
   if (legPopupState) { closeLegPopup(); return; }
   if (dataWinState) { closeDataWindow(); return; }
+  if (contractState) { closeContractPopup(); return; }
+  if (renameState) { closeRenamePopup(); return; }
 
   if (radial) {                                  // a menu is open
     const hit = radialHitTest(sx, sy);
@@ -2494,6 +3335,10 @@ function onMouseDown(e) {
     e.preventDefault();
     return;
   }
+  if (qHeld) {                                   // Q-hold owns pan; swallow other buttons
+    e.preventDefault();
+    return;
+  }
 
   const w = screenToWorld(sx, sy);
 
@@ -2514,6 +3359,62 @@ function onMouseDown(e) {
   }
 
   if (e.button === 0) {                          // left button
+    // Cmd+drag: duplicate the current selection (or the just-clicked thing
+    // if nothing is selected) and immediately grab the copy.
+    if (e.metaKey) {
+      const t0 = tensorAt(w.x, w.y);
+      const ab0 = t0 ? null : abstractionAt(w.x, w.y);
+      if (selection.size === 0 && selAbs.size === 0) {
+        if (t0) {
+          if (t0.absId != null) selAbs = new Set([t0.absId]);
+          else selection = new Set([t0.id]);
+        } else if (ab0) {
+          selAbs = new Set([ab0.id]);
+        }
+      }
+      if (selection.size === 0 && selAbs.size === 0) {
+        // Nothing to copy under cursor.
+      } else {
+        // Place copies AT the original positions, then let the move drag carry
+        // them with the click-to-tensor offset preserved. To do that we point
+        // `mouse` at the source centroid (which is the anchor pasteClipboard
+        // uses) for the duration of the paste, then restore.
+        const srcIds = new Set();
+        for (const aid of selAbs) {
+          const aa = getAbstraction(aid);
+          if (aa) for (const m of aa.members) srcIds.add(m);
+        }
+        for (const tid of selection) srcIds.add(tid);
+        const srcTs = [...srcIds].map(getTensor).filter(Boolean);
+        const cx = srcTs.reduce((s, t) => s + t.x, 0) / srcTs.length;
+        const cy = srcTs.reduce((s, t) => s + t.y, 0) / srcTs.length;
+        const savedClipboard = clipboard;
+        const savedMouseX = mouse.x, savedMouseY = mouse.y;
+        mouse.x = cx * cam.zoom + cam.x;
+        mouse.y = cy * cam.zoom + cam.y;
+        copySelection();
+        pasteClipboard();
+        clipboard = savedClipboard;
+        mouse.x = savedMouseX; mouse.y = savedMouseY;
+        // pasteClipboard already moved selection/selAbs to the new copies, which
+        // now sit on top of the originals. Drag offsets against the click point
+        // (w) so each copy follows the mouse keeping its source-relative offset.
+        const ids = new Set();
+        for (const aid of selAbs) {
+          const aa = getAbstraction(aid);
+          if (aa) for (const m of aa.members) ids.add(m);
+        }
+        for (const tid of selection) ids.add(tid);
+        const moving = [...ids].map(id => {
+          const tt = getTensor(id);
+          return tt ? { id, dx: tt.x - w.x, dy: tt.y - w.y } : null;
+        }).filter(Boolean);
+        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+        return;
+      }
+    }
     const legHit = freeLegTipAt(w.x, w.y);
     if (legHit) {
       drag = { mode: 'leg-rotate', x0: sx, y0: sy,
@@ -2521,59 +3422,116 @@ function onMouseDown(e) {
       canvas.style.cursor = 'grabbing';
       return;
     }
+    // Bond-label drag: arch adjust (view-only).
+    const bondHit = bondLabelAt(w.x, w.y);
+    if (bondHit) {
+      drag = { mode: 'bond-arch', x0: sx, y0: sy, bondId: bondHit.id, moved: false };
+      canvas.style.cursor = 'grabbing';
+      return;
+    }
+    // Build a move drag whose .moving covers EVERY currently-selected item
+    // (standalone tensors + all members of selected containers). Selection
+    // mutations on plain clicks are deferred to mouseup so click+drag keeps
+    // the multi-selection together.
+    const buildMoveSet = () => {
+      const ids = new Set();
+      for (const aid of selAbs) {
+        const aa = getAbstraction(aid);
+        if (aa) for (const m of aa.members) ids.add(m);
+      }
+      for (const tid of selection) ids.add(tid);
+      return [...ids].map(id => {
+        const tt = getTensor(id);
+        return tt ? { id, dx: tt.x - w.x, dy: tt.y - w.y } : null;
+      }).filter(Boolean);
+    };
+
     const t = tensorAt(w.x, w.y);
     if (t) {
       if (t.absId != null) {
-        if (selAbs.has(t.absId)) {
-          selection = new Set([t.id]); selAbs = new Set();
+        // Tensor belongs to a container. Treat as a click on the container,
+        // with the in-container click also setting inner-select for drill-down.
+        const cid = t.absId;
+        if (e.shiftKey) {
+          // Shift+click on member: toggle the container in selAbs (keep other selection)
+          if (selAbs.has(cid)) selAbs.delete(cid);
+          else selAbs.add(cid);
+          innerSel = null;
+          const moving = buildMoveSet();
+          drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+        } else if (selAbs.has(cid)) {
+          // Container already selected: inner-drill on click-without-drag.
+          const wasMulti = selAbs.size > 1 || selection.size > 0;
+          const moving = buildMoveSet();
+          drag = {
+            mode: 'move', x0: sx, y0: sy, moving, moved: false,
+            clickAction: wasMulti
+              ? { type: 'setAbsOnly', absId: cid, innerSel: t.id }
+              : { type: 'toggleInner', innerSelCandidate: t.id },
+          };
         } else {
-          selAbs = new Set([t.absId]); selection = new Set();
+          // Container not in selection: switch to it
+          selAbs = new Set([cid]);
+          selection = new Set();
+          innerSel = null;
+          const moving = buildMoveSet();
+          drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
         }
-        const ab = getAbstraction(t.absId);
-        const movIds = ab ? ab.members : [t.id];
-        const moving = movIds.map(id => {
-          const tt = getTensor(id);
-          return { id, dx: tt.x - w.x, dy: tt.y - w.y };
-        });
-        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
       } else {
-        selAbs = new Set();
+        // Standalone tensor.
         if (e.shiftKey) {
           if (selection.has(t.id)) selection.delete(t.id);
           else selection.add(t.id);
-        } else if (!selection.has(t.id)) {
+          innerSel = null;
+          const moving = buildMoveSet();
+          drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+        } else if (selection.has(t.id)) {
+          const wasMulti = selection.size > 1 || selAbs.size > 0;
+          const moving = buildMoveSet();
+          drag = {
+            mode: 'move', x0: sx, y0: sy, moving, moved: false,
+            clickAction: wasMulti ? { type: 'setTensorOnly', tid: t.id } : null,
+          };
+        } else {
           selection = new Set([t.id]);
+          selAbs = new Set();
+          innerSel = null;
+          const moving = buildMoveSet();
+          drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
         }
-        const moving = [...selection].map(id => {
-          const tt = getTensor(id);
-          return { id, dx: tt.x - w.x, dy: tt.y - w.y };
-        });
-        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
       }
     } else {
       const ab = abstractionAt(w.x, w.y);
       if (ab) {
-        selection = new Set();
         if (e.shiftKey) {
           if (selAbs.has(ab.id)) selAbs.delete(ab.id);
           else selAbs.add(ab.id);
+          innerSel = null;
+          const moving = buildMoveSet();
+          drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
+        } else if (selAbs.has(ab.id)) {
+          // Already selected — drag still moves everything; a plain click
+          // (no drag) either deselects all or sets selection to just this one.
+          const wasMulti = selAbs.size > 1 || selection.size > 0;
+          const moving = buildMoveSet();
+          drag = {
+            mode: 'move', x0: sx, y0: sy, moving, moved: false,
+            clickAction: wasMulti
+              ? { type: 'setAbsOnly', absId: ab.id }
+              : { type: 'clearAll' },
+          };
         } else {
           selAbs = new Set([ab.id]);
+          selection = new Set();
+          innerSel = null;
+          const moving = buildMoveSet();
+          drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
         }
-        const movIds = [];
-        for (const aid of selAbs) {
-          const aa = getAbstraction(aid);
-          if (aa) for (const m of aa.members) movIds.push(m);
-        }
-        const moving = movIds.map(id => {
-          const tt = getTensor(id);
-          return tt ? { id, dx: tt.x - w.x, dy: tt.y - w.y } : null;
-        }).filter(Boolean);
-        drag = { mode: 'move', x0: sx, y0: sy, moving, moved: false };
       } else {
-        if (!e.shiftKey) { selection = new Set(); selAbs = new Set(); }
+        // Empty canvas -> clear everything.
+        selection = new Set(); selAbs = new Set(); innerSel = null;
         drag = { mode: 'box', x0: sx, y0: sy, bx0: w.x, by0: w.y,
-                 additive: e.shiftKey, base: new Set(selection) };
+                 additive: false, base: new Set() };
       }
     }
     updateInfo();
@@ -2581,7 +3539,16 @@ function onMouseDown(e) {
 }
 
 function onMouseMove(e) {
+  const px = mouse.x, py = mouse.y;
   mouse.x = e.clientX; mouse.y = e.clientY;
+
+  // Q held alone -> pan by mouse delta (no button required).
+  if (qHeld && !drag && !grabbing) {
+    cam.x += mouse.x - px;
+    cam.y += mouse.y - py;
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
 
   if (placing) { canvas.style.cursor = 'copy'; return; }
   if (grabbing) {
@@ -2600,7 +3567,9 @@ function onMouseMove(e) {
     hoverLeg = legHit ? { tensorId: legHit.tensor.id, legIndex: legHit.legIndex } : null;
     const t = legHit ? null : tensorAt(w.x, w.y);
     hoverId = t ? t.id : null;
-    canvas.style.cursor = (legHit || t) ? 'grab' : 'default';
+    const labelHit = (legHit || t) ? null : bondLabelAt(w.x, w.y);
+    hoverBond = (legHit || t || labelHit) ? labelHit : bondAtPoint(w.x, w.y, 7 / cam.zoom);
+    canvas.style.cursor = (legHit || t || labelHit) ? 'grab' : (qHeld ? 'grab' : 'default');
     return;
   }
 
@@ -2631,6 +3600,23 @@ function onMouseMove(e) {
       const over = tip ? tip.tensor : tensorAt(w.x, w.y);
       connectHoverId = (over && over.id !== t.id) ? over.id : null;
     }
+    return;
+  }
+
+  if (drag.mode === 'bond-arch') {
+    const b = bonds.find(bd => bd.id === drag.bondId);
+    if (b) {
+      const A = getTensor(b.a), B = getTensor(b.b);
+      if (A && B) {
+        const mxw = (A.x + B.x) / 2, myw = (A.y + B.y) / 2;
+        const dxw = B.x - A.x, dyw = B.y - A.y;
+        const lenw = Math.hypot(dxw, dyw) || 1;
+        const pxw = -dyw / lenw, pyw = dxw / lenw;
+        const w = screenToWorld(mouse.x, mouse.y);
+        b.userOff = (w.x - mxw) * pxw + (w.y - myw) * pyw;
+      }
+    }
+    canvas.style.cursor = 'grabbing';
     return;
   }
 
@@ -2676,24 +3662,51 @@ function onMouseUp(e) {
     const tip = freeLegTipAt(w.x, w.y);
     const target = tip ? tip.tensor : tensorAt(w.x, w.y);
     if (src && target && target.id !== src.id) {
-      const ti = tip ? tip.legIndex : bestFreeLegToward(target, src.x, src.y);
+      const srcInd = src._srcInds && src._srcInds[drag.legIndex];
+      let ti = -1;
+      if (tip) {
+        ti = tip.legIndex;
+      } else if (srcInd && target._srcInds) {
+        // Pick the matching-name free leg on the target body, if any.
+        const used = usedLegSet(target.id);
+        for (let i = 0; i < target.rank; i++) {
+          if (used.has(i)) continue;
+          if (legsMatchByName(srcInd, target._srcInds[i])) { ti = i; break; }
+        }
+        if (ti === -1) {
+          const tagStr = (srcInd.tags && srcInd.tags.join(',')) || 'leg ' + drag.legIndex;
+          notifyError('No matching free leg on ' + target.label + ' for ' + tagStr);
+        }
+      } else {
+        // No name metadata on either side: fall back to direction-based pick.
+        ti = bestFreeLegToward(target, src.x, src.y);
+      }
       if (ti !== -1 && connectLegs(src, drag.legIndex, target, ti)) {
-        toast('Connected ' + src.label + ' ↔ ' + target.label);
+        toast('Connected ' + src.label + ' - ' + target.label);
         updateInfo();
       }
     }
   } else if (drag.mode === 'connect') {
     const t = tensorAt(w.x, w.y);
     if (t && t.id !== drag.sourceId) {
-      if (linkTensors(getTensor(drag.sourceId), t)) {
-        toast('Connected ' + getTensor(drag.sourceId).label + ' ↔ ' + t.label);
+      const n = linkTensors(getTensor(drag.sourceId), t);
+      if (n) {
+        toast('Connected ' + getTensor(drag.sourceId).label + ' - ' + t.label +
+              ' (' + n + ' leg' + (n === 1 ? '' : 's') + ')');
         updateInfo();
       }
     }
   } else if (drag.mode === 'right-pending-tensor') {
-    openTensorRadial(sx, sy, drag.sourceId);
+    const srcT = getTensor(drag.sourceId);
+    if (srcT && srcT.absId != null) openContainerRadial(sx, sy, srcT.absId);
+    else openTensorRadial(sx, sy, drag.sourceId);
   } else if (drag.mode === 'right-pending-empty') {
-    if (!drag.moved) openAddRadial(sx, sy);
+    if (!drag.moved) {
+      const wp = screenToWorld(sx, sy);
+      const ab = abstractionAt(wp.x, wp.y);
+      if (ab) openContainerRadial(sx, sy, ab.id);
+      else openAddRadial(sx, sy);
+    }
   } else if (drag.mode === 'box' && drag.moved) {
     const x0 = Math.min(drag.bx0, w.x), y0 = Math.min(drag.by0, w.y);
     const x1 = Math.max(drag.bx0, w.x), y1 = Math.max(drag.by0, w.y);
@@ -2701,6 +3714,19 @@ function onMouseUp(e) {
     for (const t of tensors)
       if (t.absId == null && t.x >= x0 && t.x <= x1 && t.y >= y0 && t.y <= y1) sel.add(t.id);
     selection = sel;
+    updateInfo();
+  } else if (drag.mode === 'move' && !drag.moved && drag.clickAction) {
+    const ca = drag.clickAction;
+    if (ca.type === 'clearAll') {
+      selAbs = new Set(); selection = new Set(); innerSel = null;
+    } else if (ca.type === 'setAbsOnly') {
+      selAbs = new Set([ca.absId]); selection = new Set();
+      innerSel = ca.innerSel != null ? ca.innerSel : null;
+    } else if (ca.type === 'setTensorOnly') {
+      selection = new Set([ca.tid]); selAbs = new Set(); innerSel = null;
+    } else if (ca.type === 'toggleInner') {
+      innerSel = (innerSel === ca.innerSelCandidate) ? null : ca.innerSelCandidate;
+    }
     updateInfo();
   }
 
@@ -2717,16 +3743,212 @@ function onWheel(e) {
   cam.x = e.clientX - before.x * cam.zoom;   // keep cursor over the same world point
   cam.y = e.clientY - before.y * cam.zoom;
 }
+// Find an unoccupied plev (no other leg on `t` has same (id, plev)) starting
+// from `start` and stepping in `delta`'s sign until the value is unique.
+// Returns the final plev. Reports a warning if any skipping happened.
+function _resolveUniquePlev(t, leg, start, delta, alsoBlockedOn) {
+  if (!t._srcInds || !t._srcInds[leg]) return { plev: Math.max(0, start), skipped: 0 };
+  const myId = t._srcInds[leg].id;
+  const blocked = new Set();
+  for (let i = 0; i < t._srcInds.length; i++) {
+    if (i === leg) continue;
+    if (t._srcInds[i].id === myId) blocked.add(t._srcInds[i].plev || 0);
+  }
+  if (alsoBlockedOn) {
+    for (const ob of alsoBlockedOn) {
+      const { tensor, exceptLeg } = ob;
+      if (!tensor._srcInds) continue;
+      for (let i = 0; i < tensor._srcInds.length; i++) {
+        if (i === exceptLeg) continue;
+        if (tensor._srcInds[i].id === myId) blocked.add(tensor._srcInds[i].plev || 0);
+      }
+    }
+  }
+  let next = Math.max(0, start);
+  let skipped = 0;
+  const step = delta >= 0 ? 1 : -1;
+  while (blocked.has(next)) {
+    next += step;
+    if (next < 0) { next = 0; break; }
+    skipped++;
+    if (skipped > 32) break;
+  }
+  return { plev: next, skipped };
+}
+function primeLegOn(t, leg, delta, alsoBlockedOn) {
+  if (!t || leg == null) return false;
+  const cur = (t.legPrime && t.legPrime[leg]) || 0;
+  const initial = Math.max(0, cur + delta);
+  const { plev: next, skipped } = _resolveUniquePlev(t, leg, initial, delta, alsoBlockedOn);
+  if (next === cur) return false;
+  t.legPrime[leg] = next;
+  if (t._srcInds && t._srcInds[leg]) t._srcInds[leg].plev = next;
+  if (skipped > 0) {
+    notifyWarn('Skipped ' + skipped + ' duplicate plev on ' + (t.label || 'tensor') +
+               ' (' + cur + " -> " + next + ')');
+  }
+  return true;
+}
+function primeHoveredLeg(delta) {
+  if (hoverLeg) {
+    pushUndo();
+    const t = getTensor(hoverLeg.tensorId);
+    const ok = primeLegOn(t, hoverLeg.legIndex, delta);
+    if (ok) updateInfo();
+    return true;
+  }
+  if (hoverBond) {
+    pushUndo();
+    const A = getTensor(hoverBond.a);
+    const B = getTensor(hoverBond.b);
+    // Pick a plev that is unique on BOTH endpoints — otherwise priming one side
+    // and not the other would break the shared-index identity.
+    const cur = (A.legPrime && A.legPrime[hoverBond.ai]) || 0;
+    const initial = Math.max(0, cur + delta);
+    const { plev: next, skipped } = _resolveUniquePlev(
+      A, hoverBond.ai, initial, delta,
+      [{ tensor: B, exceptLeg: hoverBond.bi }],
+    );
+    if (next !== cur) {
+      A.legPrime[hoverBond.ai] = next;
+      if (A._srcInds && A._srcInds[hoverBond.ai]) A._srcInds[hoverBond.ai].plev = next;
+      B.legPrime[hoverBond.bi] = next;
+      if (B._srcInds && B._srcInds[hoverBond.bi]) B._srcInds[hoverBond.bi].plev = next;
+      if (skipped > 0) {
+        notifyWarn('Skipped ' + skipped + ' duplicate plev on bond (' + cur + " -> " + next + ')');
+      }
+      updateInfo();
+    }
+    return true;
+  }
+  return false;
+}
+function zoomBy(factor) {
+  const sx = innerWidth / 2, sy = innerHeight / 2;
+  const before = screenToWorld(sx, sy);
+  cam.zoom = clamp(cam.zoom * factor, 0.15, 6);
+  cam.x = sx - before.x * cam.zoom;
+  cam.y = sy - before.y * cam.zoom;
+}
 
 /* ===================== Keyboard input ===================== */
+function convertMoveDragToDuplicate() {
+  if (!drag || drag.mode !== 'move' || drag.cmdActivated) return false;
+  if (!drag.moving || drag.moving.length === 0) return false;
+  drag.cmdActivated = true;
+  // Snap originals back to their start positions so the copies land exactly
+  // where the drag began -- i.e., as if Cmd had been held from mousedown.
+  const startWorld = screenToWorld(drag.x0, drag.y0);
+  const origMoving = drag.moving.slice();
+  for (const m of origMoving) {
+    const t = getTensor(m.id);
+    if (t) { t.x = startWorld.x + m.dx; t.y = startWorld.y + m.dy; }
+  }
+  // Repoint selection/selAbs at exactly the source set, run an in-place
+  // copy+paste anchored on the source centroid, then restore mouse/clipboard.
+  const srcIds = origMoving.map(m => m.id).filter(id => !!getTensor(id));
+  // Preserve whether the source was a container by checking abstractions.
+  const newSelection = new Set();
+  const newSelAbs = new Set();
+  for (const id of srcIds) {
+    const t = getTensor(id);
+    if (t && t.absId != null) newSelAbs.add(t.absId);
+    else newSelection.add(id);
+  }
+  // Only use selAbs for a container if EVERY one of its members is in srcIds
+  // (otherwise we'd be copying members the user wasn't dragging).
+  const finalSelAbs = new Set();
+  for (const aid of newSelAbs) {
+    const aa = getAbstraction(aid);
+    if (aa && aa.members.every(m => srcIds.includes(m))) finalSelAbs.add(aid);
+  }
+  const finalSelection = new Set(srcIds);
+  // Remove tensors that are accounted for by an included container.
+  for (const aid of finalSelAbs) {
+    const aa = getAbstraction(aid);
+    if (aa) for (const m of aa.members) finalSelection.delete(m);
+  }
+  // The container path of pasteClipboard only fires when EXACTLY one container
+  // is in selAbs (it copies as one container). For multi-container or mixed
+  // selections we drop down to flat tensor copy.
+  if (finalSelAbs.size === 1 && finalSelection.size === 0) {
+    selAbs = finalSelAbs;
+    selection = new Set();
+  } else {
+    selection = finalSelection;
+    selAbs = new Set();
+  }
+  innerSel = null;
+  const srcTs = srcIds.map(getTensor).filter(Boolean);
+  const cx = srcTs.reduce((s, t) => s + t.x, 0) / srcTs.length;
+  const cy = srcTs.reduce((s, t) => s + t.y, 0) / srcTs.length;
+  const savedClipboard = clipboard;
+  const savedMouseX = mouse.x, savedMouseY = mouse.y;
+  mouse.x = cx * cam.zoom + cam.x;
+  mouse.y = cy * cam.zoom + cam.y;
+  copySelection();
+  pasteClipboard();
+  clipboard = savedClipboard;
+  mouse.x = savedMouseX; mouse.y = savedMouseY;
+  // pasteClipboard set selection/selAbs to the new copies. Pair each new tensor
+  // with its source by exact position match (copies were anchored on centroid).
+  const newIds = new Set();
+  for (const aid of selAbs) {
+    const aa = getAbstraction(aid);
+    if (aa) for (const m of aa.members) newIds.add(m);
+  }
+  for (const tid of selection) newIds.add(tid);
+  const newTs = [...newIds].map(getTensor).filter(Boolean);
+  const taken = new Set();
+  const newMoving = [];
+  for (const orig of origMoving) {
+    const origT = getTensor(orig.id);
+    if (!origT) continue;
+    const match = newTs.find(nt =>
+      !taken.has(nt.id) &&
+      Math.abs(nt.x - origT.x) < 0.5 &&
+      Math.abs(nt.y - origT.y) < 0.5);
+    if (match) {
+      taken.add(match.id);
+      newMoving.push({ id: match.id, dx: orig.dx, dy: orig.dy });
+    }
+  }
+  drag.moving = newMoving;
+  return true;
+}
 function onKeyDown(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+  // Cmd pressed during a live move drag -> retroactively duplicate.
+  if ((e.code === 'MetaLeft' || e.code === 'MetaRight') &&
+      drag && drag.mode === 'move' && !drag.cmdActivated) {
+    convertMoveDragToDuplicate();
+    // Fall through: don't return, so the rest of metaKey handling still runs
+    // if any.
+  }
 
   if (e.metaKey) {
     const k = e.key.toLowerCase();
     if (k === 'c') { e.preventDefault(); copySelection(); }
     else if (k === 'v') { e.preventDefault(); pushUndo(); pasteClipboard(); }
     else if (k === 'z') { e.preventDefault(); undo(); }
+    else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomBy(1.2); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(1 / 1.2); }
+    return;
+  }
+
+  if (e.code === 'KeyQ' && !qHeld) {
+    qHeld = true;
+    if (!drag) canvas.style.cursor = 'grab';
+    return;
+  }
+
+  if (e.code === 'Equal' || e.key === '+') {
+    if (primeHoveredLeg(+1)) e.preventDefault();
+    return;
+  }
+  if (e.code === 'Minus' || e.key === '-') {
+    if (primeHoveredLeg(-1)) e.preventDefault();
     return;
   }
 
@@ -2738,9 +3960,8 @@ function onKeyDown(e) {
     const a = getTensor(ids[0]), b = getTensor(ids[1]);
     if (linkTensors(a, b)) { toast('Linked ' + a.label + ' ↔ ' + b.label); updateInfo(); }
   } else if (e.code === 'KeyA') {
-    pushUndo();
-    contractSelection(actionTargets());
-    updateInfo();
+    const ops = getContractOperands();
+    openContractPopup(ops);
   } else if (e.code === 'Delete' || e.code === 'Backspace') {
     e.preventDefault();
     const tg = actionTargets();
@@ -2770,6 +3991,8 @@ function onKeyDown(e) {
     if (builderState) closeBuilder();
     if (legPopupState) closeLegPopup();
     if (dataWinState) closeDataWindow();
+    if (contractState) closeContractPopup();
+    if (renameState) closeRenamePopup();
     if (grabbing) cancelGrab();
   } else if (frames.length && e.code === 'ArrowRight') {
     e.preventDefault(); applyFrame(frameIndex + 1);
@@ -2802,6 +4025,21 @@ function updateInfo() {
             fmtCount(tFloats) + '</span></div>';
     html += '<div class="stat-row"><span>Total memory</span><span class="val">' +
             fmtBytes(tMem) + '</span></div>';
+    if (innerSel) {
+      const t = getTensor(innerSel);
+      if (t) {
+        html += '<hr style="border:0;border-top:1px solid #2b3340;margin:10px 0">';
+        html += '<div class="stat-row"><span>Member</span><span class="val">' + t.label + '</span></div>';
+        html += '<div class="stat-row"><span>Rank</span><span class="val">' + t.rank + '</span></div>';
+        html += '<div class="stat-row"><span>Shape</span><span class="val">[' + t.dims.join(', ') + ']</span></div>';
+        html += '<div class="stat-row"><span>Memory</span><span class="val">' + fmtBytes(memOf(t)) + '</span></div>';
+        const primed = [];
+        for (let i = 0; i < t.legPrime.length; i++) {
+          if (t.legPrime[i] > 0) primed.push('[' + i + ']' + "'".repeat(Math.min(t.legPrime[i], 4)));
+        }
+        if (primed.length) html += '<div class="stat-row"><span>Primed</span><span class="val">' + primed.join(' ') + '</span></div>';
+      }
+    }
     infoBody.innerHTML = html;
     return;
   }
@@ -2864,18 +4102,6 @@ function updateInfo() {
   infoBody.innerHTML = html;
 }
 
-function initLegend() {
-  const grid = document.getElementById('legendGrid');
-  const labels = ['0 scalar', '1 vector', '2 matrix', '3', '4', '5', '6+'];
-  for (let r = 0; r < 7; r++) {
-    const d = document.createElement('div');
-    d.className = 'legend-item';
-    d.innerHTML = '<span class="dot" style="background:' + rankColor(r) +
-                  '"></span><span>' + labels[r] + '</span>';
-    grid.appendChild(d);
-  }
-}
-
 /* ===================== Init ===================== */
 function resize() {
   DPR = window.devicePixelRatio || 1;
@@ -2887,7 +4113,6 @@ function resize() {
 
 function init() {
   resize();
-  initLegend();
 
   const cx = innerWidth / 2, cy = innerHeight / 2;
   const a = addTensor(cx - 95, cy + 10, 3);
@@ -2904,6 +4129,13 @@ function init() {
   canvas.addEventListener('contextmenu', e => e.preventDefault());
   canvas.addEventListener('wheel', onWheel, { passive: false });
   window.addEventListener('auxclick', e => { if (e.button === 1) e.preventDefault(); });
+  window.addEventListener('keyup', e => {
+    if (e.code === 'KeyQ') {
+      qHeld = false;
+      if (!drag) canvas.style.cursor = 'default';
+    }
+  });
+  window.addEventListener('blur', () => { qHeld = false; });
   window.addEventListener('resize', resize);
   dimInput.addEventListener('change', () => {
     let v = parseInt(dimInput.value, 10);
@@ -2933,6 +4165,44 @@ function init() {
   document.getElementById('lpCancel').addEventListener('click', closeLegPopup);
   document.getElementById('dwBake').addEventListener('click', bakeReshape);
   document.getElementById('dwClose').addEventListener('click', closeDataWindow);
+
+  document.getElementById('cpDo').addEventListener('click', performContract);
+  document.getElementById('cpCancel').addEventListener('click', closeContractPopup);
+
+  document.getElementById('rnDo').addEventListener('click', performRename);
+  document.getElementById('rnCancel').addEventListener('click', closeRenamePopup);
+  document.getElementById('rnInput').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); performRename(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeRenamePopup(); }
+    e.stopPropagation();
+  });
+  canvas.addEventListener('dblclick', e => {
+    const sx = e.clientX, sy = e.clientY;
+    const w = screenToWorld(sx, sy);
+    const bondLab = bondLabelAt(w.x, w.y);
+    if (bondLab) {
+      openRenamePopup('leg-bond', bondLab.id, sx, sy, { bondId: bondLab.id });
+      e.preventDefault(); return;
+    }
+    const legLab = freeLegLabelAt(w.x, w.y);
+    if (legLab) {
+      openRenamePopup('leg-free',
+        legLab.tensor.id + ':' + legLab.legIndex, sx, sy,
+        { tensorId: legLab.tensor.id, legIndex: legLab.legIndex });
+      e.preventDefault(); return;
+    }
+    const t = tensorAt(w.x, w.y);
+    if (t) { openRenamePopup('tensor', t.id, sx, sy); e.preventDefault(); return; }
+    const ab = abstractionAt(w.x, w.y);
+    if (ab) { openRenamePopup('container', ab.id, sx, sy); e.preventDefault(); return; }
+  });
+  document.getElementById('cpSwap').addEventListener('click', () => {
+    if (!contractState) return;
+    const t = contractState.left;
+    contractState.left = contractState.right;
+    contractState.right = t;
+    renderContractPopup();
+  });
 
   const folderInput = document.getElementById('folderInput');
   const fileInput = document.getElementById('fileInput');
