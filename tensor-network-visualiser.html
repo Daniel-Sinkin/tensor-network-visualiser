@@ -403,8 +403,9 @@ const RADIUS_BASE = 21, RADIUS_PER_RANK = 1.5, RADIUS_MAX = 34, RADIUS_R0 = 24;
 const LEG_STUB = 15;
 const MOVE_THRESH = 5;
 const MAX_TENSOR_SIZE = 1 << 22;          // 4,194,304 elements (~32 MB)
-const HUB_R = 27, RING_W = 58, RING_GAP = 4;
-const RADIAL_GRACE_MS = 200;
+const HUB_R = 22, RING_W = 44, RING_GAP = 3;
+const RADIAL_GRACE_MS = 120;
+const RADIAL_ALPHA = 0.8;
 
 const F_BODY  = '400 10.5px -apple-system, "Segoe UI", Roboto, sans-serif';
 const F_MONO  = '400 9.5px "SF Mono", Menlo, Consolas, monospace';
@@ -2605,6 +2606,7 @@ function drawRadial() {
   } else if (!hover) {
     radial.gracePath = null;
   }
+  ctx.globalAlpha = RADIAL_ALPHA;
   let items = radial.items;
   drawRadialRing(items, 0, hover, radial.openPath[0] ?? -1);
   for (let r = 0; r < radial.openPath.length; r++) {
@@ -2613,6 +2615,7 @@ function drawRadial() {
     items = parent.children;
     drawRadialRing(items, r + 1, hover, radial.openPath[r + 1] ?? -1);
   }
+  ctx.globalAlpha = 1;
   ctx.beginPath();
   ctx.arc(radial.cx, radial.cy, HUB_R, 0, 2 * Math.PI);
   ctx.fillStyle = 'rgba(22,27,35,0.96)';
@@ -3343,7 +3346,7 @@ function onMouseDown(e) {
   const w = screenToWorld(sx, sy);
 
   if (e.button === 2) {                          // right button
-    if (e.ctrlKey) {                             // Ctrl+right-drag: cut bonds
+    if (e.ctrlKey || e.metaKey) {                // Ctrl/Cmd+right-drag: cut bonds
       drag = { mode: 'cut', path: [w], x0: sx, y0: sy, moved: false };
       canvas.style.cursor = 'crosshair';
       e.preventDefault();
@@ -3359,9 +3362,9 @@ function onMouseDown(e) {
   }
 
   if (e.button === 0) {                          // left button
-    // Cmd+drag: duplicate the current selection (or the just-clicked thing
-    // if nothing is selected) and immediately grab the copy.
-    if (e.metaKey) {
+    // Ctrl/Cmd+drag: duplicate the current selection (or the just-clicked
+    // thing if nothing is selected) and immediately grab the copy.
+    if (e.metaKey || e.ctrlKey) {
       const t0 = tensorAt(w.x, w.y);
       const ab0 = t0 ? null : abstractionAt(w.x, w.y);
       if (selection.size === 0 && selAbs.size === 0) {
@@ -3920,14 +3923,15 @@ function onKeyDown(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
 
   // Cmd pressed during a live move drag -> retroactively duplicate.
-  if ((e.code === 'MetaLeft' || e.code === 'MetaRight') &&
+  if ((e.code === 'MetaLeft' || e.code === 'MetaRight' ||
+       e.code === 'ControlLeft' || e.code === 'ControlRight') &&
       drag && drag.mode === 'move' && !drag.cmdActivated) {
     convertMoveDragToDuplicate();
     // Fall through: don't return, so the rest of metaKey handling still runs
     // if any.
   }
 
-  if (e.metaKey) {
+  if (e.metaKey || e.ctrlKey) {
     const k = e.key.toLowerCase();
     if (k === 'c') { e.preventDefault(); copySelection(); }
     else if (k === 'v') { e.preventDefault(); pushUndo(); pasteClipboard(); }
