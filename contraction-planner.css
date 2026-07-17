@@ -213,6 +213,132 @@ button {
   outline-offset: 2px;
 }
 
+.variable-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  padding: 9px 15px;
+  background: rgba(13, 19, 27, 0.94);
+}
+
+.variable-heading {
+  display: grid;
+  flex: none;
+  gap: 2px;
+  border-right: 1px solid var(--border);
+  padding-right: 14px;
+}
+
+.variable-heading strong {
+  color: #b9c5d5;
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.variable-heading span {
+  max-width: 235px;
+  color: var(--quiet);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.variable-list {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.variable-chip {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  border: 1px solid rgba(102, 210, 220, 0.27);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(102, 210, 220, 0.055);
+}
+
+.variable-chip input {
+  height: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #c8edf0;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-align: center;
+}
+
+.variable-chip input:focus {
+  background: rgba(102, 210, 220, 0.09);
+  box-shadow: inset 0 -2px var(--shared);
+}
+
+.variable-name-input {
+  width: 54px;
+  padding: 0 5px;
+  font-weight: 700 !important;
+}
+
+.variable-value-input {
+  width: 61px;
+  padding: 0 6px;
+}
+
+.variable-equals {
+  color: #718297;
+  font-family: var(--mono);
+  font-size: 10px;
+}
+
+.variable-remove-button,
+.variable-add-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.variable-remove-button {
+  width: 28px;
+  height: 100%;
+  border-left: 1px solid rgba(102, 210, 220, 0.15);
+  color: #718297;
+  font-size: 14px;
+}
+
+.variable-remove-button:hover {
+  background: rgba(241, 124, 114, 0.09);
+  color: var(--red);
+}
+
+.variable-add-button {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 1px dashed rgba(102, 210, 220, 0.46);
+  border-radius: 7px;
+  color: var(--shared);
+  font-family: var(--mono);
+  font-size: 19px;
+}
+
+.variable-add-button:hover {
+  border-style: solid;
+  background: rgba(102, 210, 220, 0.09);
+  color: #b9eff2;
+}
+
 .workbench {
   border: 1px solid var(--border);
   border-top: 0;
@@ -515,6 +641,10 @@ button {
   align-items: center;
 }
 
+.leg-row {
+  align-items: start;
+}
+
 .leg-table-heading {
   margin-top: 13px;
   padding: 0 3px 5px;
@@ -543,6 +673,29 @@ button {
   font-size: 11px;
 }
 
+.leg-field {
+  min-width: 0;
+}
+
+.field-resolution {
+  display: block;
+  min-width: 0;
+  margin: 3px 2px 0;
+  color: #718397;
+  font-family: var(--mono);
+  font-size: 8px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.field-resolution:empty {
+  display: none;
+}
+
+.leg-expansion {
+  color: #8fcdd2;
+}
+
 .leg-row input:focus {
   border-color: var(--a);
   box-shadow: 0 0 0 3px rgba(99, 165, 255, 0.1);
@@ -554,6 +707,7 @@ button {
 }
 
 .axis-index {
+  margin-top: 8px;
   color: var(--quiet);
   font-family: var(--mono);
   font-size: 10px;
@@ -564,6 +718,7 @@ button {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
+  margin-top: 2px;
 }
 
 .mini-button,
@@ -818,6 +973,22 @@ button {
 
   .reset-button {
     margin-left: 0;
+  }
+
+  .variable-bar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .variable-heading {
+    width: 100%;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 0 8px;
+  }
+
+  .variable-heading span {
+    max-width: none;
   }
 
   .workbench {

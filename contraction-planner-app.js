@@ -2,20 +2,24 @@
   "use strict";
 
   const model = window.ContractionModel;
-  const storageKey = "tensor-network-visualiser.two-tensor-workbench.v2";
+  const storageKey = "tensor-network-visualiser.two-tensor-workbench.v3";
   const example = {
     arithmetic: "complex",
     precision: "f32",
+    variables: [
+      { name: "D", value: "4" },
+      { name: "d", value: "2" },
+    ],
     A: [
-      { name: "batch", dim: "2" },
-      { name: "spin", dim: "3" },
-      { name: "bond", dim: "5" },
-      { name: "left", dim: "7" },
+      { name: "batch", dim: "d" },
+      { name: "spin", dim: "d" },
+      { name: "bond", dim: "D" },
+      { name: "left", dim: "D" },
     ],
     B: [
-      { name: "out", dim: "11" },
-      { name: "bond", dim: "5" },
-      { name: "spin", dim: "3" },
+      { name: "out", dim: "D" },
+      { name: "bond", dim: "D" },
+      { name: "spin", dim: "d" },
     ],
   };
 
@@ -32,6 +36,9 @@
   const errorBox = document.getElementById("errorBox");
   const validityBadge = document.getElementById("validityBadge");
   const legRowTemplate = document.getElementById("legRowTemplate");
+  const variableList = document.getElementById("variableList");
+  const variableTemplate = document.getElementById("variableTemplate");
+  const dimensionVariables = document.getElementById("dimensionVariables");
 
   const metricFlops = document.getElementById("metricFlops");
   const metricFlopsNote = document.getElementById("metricFlopsNote");
@@ -53,6 +60,7 @@
     return {
       arithmetic: example.arithmetic,
       precision: example.precision,
+      variables: example.variables.map((variable) => ({ ...variable })),
       A: example.A.map((leg) => ({ ...leg })),
       B: example.B.map((leg) => ({ ...leg })),
     };
@@ -61,10 +69,19 @@
   function loadState() {
     try {
       const parsed = JSON.parse(localStorage.getItem(storageKey));
-      if (!parsed || !Array.isArray(parsed.A) || !Array.isArray(parsed.B)) return cloneExample();
+      if (
+        !parsed ||
+        !Array.isArray(parsed.variables) ||
+        !Array.isArray(parsed.A) ||
+        !Array.isArray(parsed.B)
+      ) return cloneExample();
       return {
         arithmetic: parsed.arithmetic === "real" ? "real" : "complex",
         precision: parsed.precision === "f64" ? "f64" : "f32",
+        variables: parsed.variables.map((variable) => ({
+          name: String(variable.name ?? ""),
+          value: String(variable.value ?? ""),
+        })),
         A: parsed.A.map((leg) => ({ name: String(leg.name ?? ""), dim: String(leg.dim ?? "") })),
         B: parsed.B.map((leg) => ({ name: String(leg.name ?? ""), dim: String(leg.dim ?? "") })),
       };
@@ -147,6 +164,64 @@
     return `leg_${index}`;
   }
 
+  function uniqueVariableName() {
+    const used = new Set(state.variables.map((variable) => variable.name));
+    let index = 1;
+    while (used.has(`v${index}`)) index++;
+    return `v${index}`;
+  }
+
+  function renderVariableOptions() {
+    dimensionVariables.innerHTML = state.variables
+      .map((variable) => variable.name.trim())
+      .filter((name) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name))
+      .map((name) => `<option value="${escapeMarkup(name)}"></option>`)
+      .join("");
+  }
+
+  function renderVariables() {
+    variableList.innerHTML = "";
+    state.variables.forEach((variable, index) => {
+      const chip = variableTemplate.content.firstElementChild.cloneNode(true);
+      chip.dataset.variableIndex = String(index);
+      const nameInput = chip.querySelector(".variable-name-input");
+      const valueInput = chip.querySelector(".variable-value-input");
+      nameInput.value = variable.name;
+      valueInput.value = variable.value;
+      nameInput.setAttribute("aria-label", `Variable ${index + 1} name`);
+      valueInput.setAttribute("aria-label", `Value of variable ${variable.name || index + 1}`);
+      nameInput.addEventListener("input", () => {
+        variable.name = nameInput.value;
+        valueInput.setAttribute("aria-label", `Value of variable ${variable.name || index + 1}`);
+        renderVariableOptions();
+        scheduleUpdate();
+      });
+      valueInput.addEventListener("input", () => {
+        variable.value = valueInput.value;
+        scheduleUpdate();
+      });
+      chip.querySelector(".variable-remove-button").addEventListener("click", () => {
+        state.variables.splice(index, 1);
+        renderVariables();
+        scheduleUpdate();
+      });
+      variableList.appendChild(chip);
+    });
+    renderVariableOptions();
+  }
+
+  function addVariable() {
+    const name = uniqueVariableName();
+    state.variables.push({ name, value: "2" });
+    renderVariables();
+    scheduleUpdate();
+    const input = variableList.lastElementChild?.querySelector(".variable-name-input");
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }
+
   function renderLegEditor(tensorName, container) {
     const legs = state[tensorName];
     container.innerHTML = "";
@@ -191,6 +266,47 @@
     shapeB.textContent = rawShape(state.B);
   }
 
+  function updateEditorAnnotations() {
+    let variables;
+    try {
+      variables = model.normalizeVariables(state.variables);
+    } catch (_) {
+      variables = null;
+    }
+    for (const tensorName of ["A", "B"]) {
+      const rows = document.querySelectorAll(`#legs${tensorName} .leg-row`);
+      state[tensorName].forEach((leg, index) => {
+        const row = rows[index];
+        if (!row) return;
+        const expansion = row.querySelector(".leg-expansion");
+        const resolution = row.querySelector(".dimension-resolution");
+        const template = String(leg.name);
+        if (template.includes("$")) {
+          try {
+            const expanded = variables
+              ? model.expandLegName(template, variables, `leg name of ${tensorName} axis ${index}`)
+              : null;
+            expansion.textContent = expanded == null ? "unresolved" : `→ ${expanded}`;
+          } catch (_) {
+            expansion.textContent = "unresolved";
+          }
+        } else expansion.textContent = "";
+
+        const token = String(leg.dim).trim();
+        if (token && !/^[1-9][0-9]*$/.test(token)) {
+          try {
+            const value = variables
+              ? model.resolveDimension(token, variables, `dimension of ${tensorName}.${leg.name}`)
+              : null;
+            resolution.textContent = value == null ? "unresolved" : `= ${exactCount(value)}`;
+          } catch (_) {
+            resolution.textContent = "unresolved";
+          }
+        } else resolution.textContent = "";
+      });
+    }
+  }
+
   function moveLeg(tensorName, from, to) {
     const legs = state[tensorName];
     if (to < 0 || to >= legs.length) return;
@@ -200,7 +316,8 @@
   }
 
   function addLeg(tensorName) {
-    state[tensorName].push({ name: uniqueLegName(), dim: "2" });
+    const defaultDimension = state.variables.some((variable) => variable.name === "d") ? "d" : "2";
+    state[tensorName].push({ name: uniqueLegName(), dim: defaultDimension });
     renderEditors();
     scheduleUpdate();
   }
@@ -223,20 +340,55 @@
     ];
   }
 
+  function resolveModel() {
+    const variables = model.normalizeVariables(state.variables);
+    const resolvedInput = model.resolveNetworkVariables(networkInput(), variables);
+    return {
+      variables,
+      network: model.normalizeNetwork(resolvedInput),
+    };
+  }
+
+  function displayDimension(token, value, compact) {
+    const text = String(token).trim();
+    if (/^[1-9][0-9]*$/.test(text)) return exactCount(value);
+    return compact ? `${text}=${exactCount(value)}` : `${text} (= ${exactCount(value)})`;
+  }
+
+  function displayContext(step) {
+    const tokensA = state.A.map((leg) => String(leg.dim).trim());
+    const tokensB = state.B.map((leg) => String(leg.dim).trim());
+    return {
+      tokensA,
+      tokensB,
+      outputTokens: step.freeA.map((leg) => tokensA[leg.axis]).concat(
+        step.freeB.map((leg) => tokensB[leg.axis])
+      ),
+    };
+  }
+
+  function symbolicShape(legs, tokens, includeResolved) {
+    if (!legs.length) return "rank 0 · scalar";
+    const symbolic = `[${tokens.join(" × ")}]`;
+    const resolved = `[${legs.map((leg) => leg.dim).join(" × ")}]`;
+    const same = tokens.every((token, index) => token === legs[index].dim.toString());
+    return `rank ${legs.length} · ${symbolic}${includeResolved && !same ? ` = ${resolved}` : ""}`;
+  }
+
   function setMetric(element, value, exactValue) {
     element.textContent = value;
     element.title = exactValue == null ? "" : exactCount(exactValue);
   }
 
-  function renderOutput(result) {
+  function renderOutput(result, context) {
     const legs = result.tensor.legs;
-    outputRank.textContent = normalizedShape(legs);
+    outputRank.textContent = symbolicShape(legs, context.outputTokens, true);
     if (!legs.length) {
       outputLegs.innerHTML = '<span class="output-leg scalar">scalar · storage shape [1]</span>';
       return;
     }
     outputLegs.innerHTML = legs
-      .map((leg, index) => `<span class="output-leg">axis ${index} · ${escapeMarkup(leg.name)} : ${escapeMarkup(leg.dim)}</span>`)
+      .map((leg, index) => `<span class="output-leg">axis ${index} · ${escapeMarkup(leg.name)} : ${escapeMarkup(displayDimension(context.outputTokens[index], leg.dim, false))}</span>`)
       .join("");
   }
 
@@ -257,9 +409,16 @@
     metricWorkspace.title = exactCount(step.workspaceBytes);
   }
 
-  function renderLowering(step) {
+  function renderLowering(step, context) {
     sharedLegs.textContent = step.shared.length
-      ? step.shared.map((leg) => `${leg.name}:${leg.dim}`).join(", ")
+      ? step.shared.map((leg) => {
+        const tokenA = context.tokensA[leg.axisA];
+        const tokenB = context.tokensB[leg.axisB];
+        const dimension = tokenA === tokenB
+          ? displayDimension(tokenA, leg.dim, true)
+          : `${tokenA}/${tokenB}=${exactCount(leg.dim)}`;
+        return `${leg.name}:${dimension}`;
+      }).join(", ")
       : "none · outer product (K = 1)";
     badgeA.textContent = step.identityA ? "identity" : "reorder";
     badgeA.classList.toggle("identity", step.identityA);
@@ -285,9 +444,9 @@
       `</g>`;
   }
 
-  function freeLegMarkup(leg, side, rank) {
+  function freeLegMarkup(leg, side, rank, token) {
     const y = axisY(leg.axis, rank);
-    const label = shorten(`${leg.name}:${leg.dim}`, 19);
+    const label = shorten(`${leg.name}:${displayDimension(token, leg.dim, true)}`, 22);
     if (side === "a") {
       return `<line class="svg-free-line a" x1="180" y1="${y}" x2="116" y2="${y}"></line>` +
         `<circle class="svg-free-port a" cx="180" cy="${y}" r="4"></circle>` +
@@ -298,11 +457,14 @@
       `<text class="svg-free-label b" x="893" y="${y + 4}">${escapeMarkup(label)}</text>`;
   }
 
-  function sharedLegMarkup(leg, index, count, rankA, rankB) {
+  function sharedLegMarkup(leg, index, count, rankA, rankB, tokenA, tokenB) {
     const yA = axisY(leg.axisA, rankA);
     const yB = axisY(leg.axisB, rankB);
     const labelY = count <= 1 ? 118 : 82 + (index * 72) / (count - 1);
-    const label = shorten(`${leg.name}:${leg.dim}`, 22);
+    const dimension = tokenA === tokenB
+      ? displayDimension(tokenA, leg.dim, true)
+      : `${tokenA}/${tokenB}=${exactCount(leg.dim)}`;
+    const label = shorten(`${leg.name}:${dimension}`, 25);
     const width = Math.min(176, Math.max(62, 22 + label.length * 7));
     return `<path class="svg-shared-line" d="M 370 ${yA} C 430 ${yA}, 450 ${labelY}, 500 ${labelY} C 550 ${labelY}, 570 ${yB}, 630 ${yB}"></path>` +
       `<circle class="svg-shared-port" cx="370" cy="${yA}" r="5"></circle>` +
@@ -311,24 +473,40 @@
       `<text class="svg-wire-label" x="500" y="${labelY + 4}">${escapeMarkup(label)}</text>`;
   }
 
-  function renderDiagram(network, step) {
+  function renderDiagram(network, step, context) {
     const valid = Boolean(network && step);
     const tensorA = valid ? network.tensors[0] : { legs: state.A };
     const tensorB = valid ? network.tensors[1] : { legs: state.B };
-    const shapeAText = valid ? normalizedShape(tensorA.legs) : rawShape(state.A);
-    const shapeBText = valid ? normalizedShape(tensorB.legs) : rawShape(state.B);
-    const resultShape = valid ? normalizedShape(step.resultLegs) : "waiting for valid input";
+    const shapeAText = valid ? symbolicShape(tensorA.legs, context.tokensA, false) : rawShape(state.A);
+    const shapeBText = valid ? symbolicShape(tensorB.legs, context.tokensB, false) : rawShape(state.B);
+    const resultShape = valid
+      ? symbolicShape(step.resultLegs, context.outputTokens, false)
+      : "waiting for valid input";
     const outputNames = valid && step.resultLegs.length
-      ? shorten(step.resultLegs.map((leg) => `${leg.name}:${leg.dim}`).join(" · "), 68)
+      ? shorten(step.resultLegs.map((leg, index) =>
+        `${leg.name}:${displayDimension(context.outputTokens[index], leg.dim, true)}`
+      ).join(" · "), 76)
       : valid ? "scalar · storage [1]" : "correct the leg model above";
 
     let wires = "";
     if (valid) {
-      wires += step.freeA.map((leg) => freeLegMarkup(leg, "a", tensorA.legs.length)).join("");
-      wires += step.freeB.map((leg) => freeLegMarkup(leg, "b", tensorB.legs.length)).join("");
+      wires += step.freeA.map((leg) =>
+        freeLegMarkup(leg, "a", tensorA.legs.length, context.tokensA[leg.axis])
+      ).join("");
+      wires += step.freeB.map((leg) =>
+        freeLegMarkup(leg, "b", tensorB.legs.length, context.tokensB[leg.axis])
+      ).join("");
       if (step.shared.length) {
         wires += step.shared
-          .map((leg, index) => sharedLegMarkup(leg, index, step.shared.length, tensorA.legs.length, tensorB.legs.length))
+          .map((leg, index) => sharedLegMarkup(
+            leg,
+            index,
+            step.shared.length,
+            tensorA.legs.length,
+            tensorB.legs.length,
+            context.tokensA[leg.axisA],
+            context.tokensB[leg.axisB]
+          ))
           .join("");
       } else {
         wires += '<line class="svg-flow-line" x1="390" y1="118" x2="610" y2="118" stroke-dasharray="6 7"></line>' +
@@ -365,6 +543,8 @@
     validityBadge.classList.add("invalid");
     errorBox.hidden = false;
     errorBox.textContent = error && error.message ? error.message : String(error);
+    shapeA.title = "";
+    shapeB.title = "";
     outputRank.textContent = "not available";
     outputLegs.innerHTML = '<span class="output-leg scalar">C will appear when A and B are valid.</span>';
     [metricFlops, metricMacs, metricOutput, metricScratch, metricWorkspace].forEach((element) => {
@@ -386,23 +566,27 @@
   }
 
   function updateWorkbench() {
+    updateEditorAnnotations();
     try {
-      const network = model.normalizeNetwork(networkInput());
+      const { network } = resolveModel();
       const result = model.evaluateTree(network, "A*B", {
         arithmetic: state.arithmetic,
         precision: state.precision,
       });
       const step = result.steps[0];
-      shapeA.textContent = normalizedShape(network.tensors[0].legs);
-      shapeB.textContent = normalizedShape(network.tensors[1].legs);
+      const context = displayContext(step);
+      shapeA.textContent = rawShape(state.A);
+      shapeA.title = normalizedShape(network.tensors[0].legs);
+      shapeB.textContent = rawShape(state.B);
+      shapeB.title = normalizedShape(network.tensors[1].legs);
       validityBadge.textContent = step.outerProduct ? "Valid outer product" : "Valid contraction";
       validityBadge.classList.remove("invalid");
       errorBox.hidden = true;
       errorBox.textContent = "";
-      renderDiagram(network, step);
-      renderOutput(result);
+      renderDiagram(network, step, context);
+      renderOutput(result, context);
       renderMetrics(result, step);
-      renderLowering(step);
+      renderLowering(step, context);
     } catch (error) {
       clearComputedDisplay(error);
     }
@@ -411,6 +595,7 @@
   function initialize() {
     state = loadState();
     syncControls();
+    renderVariables();
     renderEditors();
 
     document.querySelectorAll('input[name="arithmetic"]').forEach((input) => {
@@ -429,9 +614,11 @@
     });
     document.getElementById("addLegA").addEventListener("click", () => addLeg("A"));
     document.getElementById("addLegB").addEventListener("click", () => addLeg("B"));
+    document.getElementById("addVariableButton").addEventListener("click", addVariable);
     document.getElementById("resetButton").addEventListener("click", () => {
       state = cloneExample();
       syncControls();
+      renderVariables();
       renderEditors();
       scheduleUpdate();
     });

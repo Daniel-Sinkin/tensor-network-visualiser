@@ -24,14 +24,34 @@ rows beneath A and B:
 - a leg name appearing on both tensors is contracted and connected in the diagram;
 - a name appearing on only one tensor remains free and becomes an axis of C;
 - names are exact and case-sensitive after trimming;
-- dimensions are arbitrary-size positive integers;
+- dimensions are arbitrary-size positive integers or registered variables;
 - shared names must have the same dimension on both sides.
 
 Leg rows may be added, removed, and reordered, but the workflow remains one fixed contraction,
 `A * B`. C updates immediately and orders its axes as free A legs followed by free B legs.
 
-The controls above the panel select real or complex arithmetic and f32 or f64 storage. Every
-valid edit updates:
+The controls above the panel select real or complex arithmetic and f32 or f64 storage. The
+variable registry starts with `D = 4` and `d = 2`. Press `+` to register another variable, then
+edit its case-sensitive identifier and positive integer value. A dimension field accepts either
+an integer literal or a registered name such as `D`.
+
+Leg names can interpolate the same variables:
+
+```text
+$row                  direct substitution
+$(col + 1)            integer expression
+r$row,c$(col)-$(col+1)
+```
+
+For `row = 3` and `col = 4`, the last template expands to `r3,c4-5`. The raw template remains in
+the editor, while expanded names determine duplicate detection, shared-leg connections, and C's
+axis names. `$$` produces a literal dollar sign.
+
+Interpolation expressions support integer literals, registered variables, parentheses, unary
+`+`/`-`, and binary `+`, `-`, `*`, `/`, and `%`. Division must be exact. Dimension fields remain
+deliberately simpler: they accept a literal or one variable name, not an expression.
+
+Every valid edit updates:
 
 - the shared-leg connections and output dimensions;
 - scalar multiply-accumulate positions and conventional real FLOPs;
@@ -70,9 +90,9 @@ needed:
 node browser-smoke.mjs
 ```
 
-It opens the real page in headless Chrome and checks the fixed A/B editors, automatic connection
-changes, C's axes, cost totals, arithmetic and precision controls, invalid dimensions, and the
-link back to the existing canvas.
+It opens the real page in headless Chrome and checks the fixed A/B editors, default and newly
+registered variables, `$` interpolation, automatic connection changes, C's axes, cost totals,
+arithmetic and precision controls, invalid dimensions, and the link back to the existing canvas.
 
 ## Optional Julia contraction server
 

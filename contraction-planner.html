@@ -47,6 +47,15 @@
     <button type="button" id="resetButton" class="reset-button">Reset example</button>
   </section>
 
+  <section class="variable-bar" aria-labelledby="variableHeading">
+    <div class="variable-heading">
+      <strong id="variableHeading">Leg variables</strong>
+      <span>Dimensions use D; leg names use $row or $(col+1).</span>
+    </div>
+    <div id="variableList" class="variable-list"></div>
+    <button type="button" id="addVariableButton" class="variable-add-button" aria-label="Register a new variable" title="Register a new variable">+</button>
+  </section>
+
   <section class="workbench" aria-labelledby="workbenchHeading">
     <div class="workbench-heading">
       <div>
@@ -128,8 +137,14 @@
 <template id="legRowTemplate">
   <div class="leg-row">
     <span class="axis-index"></span>
-    <input class="leg-name-input" type="text" maxlength="80" spellcheck="false" autocomplete="off" aria-label="Leg name">
-    <input class="leg-dim-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" aria-label="Leg dimension">
+    <div class="leg-field">
+      <input class="leg-name-input" type="text" maxlength="80" spellcheck="false" autocomplete="off" placeholder="name or r$row" aria-label="Leg name or template">
+      <span class="leg-expansion field-resolution"></span>
+    </div>
+    <div class="leg-field">
+      <input class="leg-dim-input" type="text" list="dimensionVariables" spellcheck="false" autocomplete="off" placeholder="integer or variable" aria-label="Leg dimension">
+      <span class="dimension-resolution field-resolution"></span>
+    </div>
     <div class="leg-actions">
       <button type="button" class="mini-button move-leg-up" title="Move axis up" aria-label="Move axis up">↑</button>
       <button type="button" class="mini-button move-leg-down" title="Move axis down" aria-label="Move axis down">↓</button>
@@ -137,6 +152,17 @@
     </div>
   </div>
 </template>
+
+<template id="variableTemplate">
+  <div class="variable-chip">
+    <input class="variable-name-input" type="text" maxlength="32" spellcheck="false" autocomplete="off" aria-label="Variable name">
+    <span class="variable-equals">=</span>
+    <input class="variable-value-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" aria-label="Variable value">
+    <button type="button" class="variable-remove-button" aria-label="Remove variable" title="Remove variable">×</button>
+  </div>
+</template>
+
+<datalist id="dimensionVariables"></datalist>
 
 <script src="contraction-model.js"></script>
 <script src="contraction-planner-app.js"></script>

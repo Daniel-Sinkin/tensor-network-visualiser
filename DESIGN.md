@@ -15,9 +15,35 @@ The central panel updates immediately:
   dimensions;
 - invalid or incomplete input is reported in the panel instead of producing a cost.
 
-Real/complex arithmetic and f32/f64 precision controls sit above the panel. There is no
-contraction-order input and no optimizer in this first workflow. The tested multi-tensor planning
-logic remains available in `contraction-model.js` for a later interface.
+Real/complex arithmetic, f32/f64 precision, and a leg-variable registry sit above the panel. There
+is no contraction-order input and no optimizer in this first workflow. The tested multi-tensor
+planning logic remains available in `contraction-model.js` for a later interface.
+
+## Leg variables
+
+The registry starts with `D = 4` and `d = 2`. Its `+` control registers another variable with a
+unique editable identifier and positive integer value. Variables may be edited or removed.
+
+A dimension field accepts either a positive integer literal or the exact, case-sensitive name of
+a registered variable. Variable values are resolved before calling the numerical contraction
+model; changing a value therefore updates C, FLOPs, and storage immediately. Symbolic names remain
+visible on tensor shapes, connections, and output axes, alongside their resolved values where that
+helps interpretation.
+
+Variable identifiers use `[A-Za-z_][A-Za-z0-9_]*`. Values are positive integer literals; variable
+aliases and dimension expressions are not part of this version. Duplicate names, unknown names,
+and non-positive or non-integer values invalidate the live contraction with a specific message.
+
+Leg names are templates. `$name` inserts a registered variable directly, and `$(expression)`
+inserts an integer expression using registered variables. For example, with `row = 3` and
+`col = 4`, `r$row,c$(col)-$(col+1)` expands to `r3,c4-5`. Expanded names—not the raw templates—are
+used for duplicate detection, shared-leg matching, output axes, and connection labels. The editor
+keeps the template visible and shows its expansion.
+
+Interpolation expressions are parsed without `eval` and support integer literals, variables,
+parentheses, unary `+`/`-`, and binary `+`, `-`, `*`, `/`, and `%`. Division must be exact and
+division by zero is invalid. An interpolated result may be zero or negative because it labels an
+index; registered variable values and tensor dimensions remain strictly positive.
 
 ## Lowering and cost
 
@@ -47,6 +73,11 @@ real FLOPs and a complex MAC as eight. Counts use arbitrary-precision integers.
 - Editing a name or dimension updates connections, C, and all totals without an Evaluate button.
 - Multiple shared legs show distinct labeled connections and the correct right-hand permutation.
 - Arithmetic and precision controls update FLOP/storage totals live.
+- `D = 4` and `d = 2` exist initially; pressing `+` registers an editable variable.
+- Dimension fields accept registered variables, and variable edits propagate through the diagram,
+  C, and every cost metric.
+- `$name` and `$(integer expression)` expand inside leg names and determine live connections.
+- Duplicate, unknown, and invalid variables fail visibly without losing the symbolic input.
 - The layout remains usable on desktop and narrow screens.
 - Model unit tests and a headless browser interaction test cover the lowering, live edits, controls,
   invalid dimensions, and the link back to the existing visual canvas.

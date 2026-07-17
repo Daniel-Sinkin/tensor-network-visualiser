@@ -151,6 +151,53 @@ test("outer products and dimensions beyond Number precision remain exact", () =>
   assert.equal(result.resultBytes, 432345564227567664n);
 });
 
+test("registered variables resolve dimensions and interpolate leg names", () => {
+  const variables = model.normalizeVariables([
+    { name: "D", value: "4" },
+    { name: "d", value: "2" },
+    { name: "row", value: "3" },
+    { name: "col", value: "4" },
+  ]);
+  assert.equal(model.resolveDimension("D", variables), 4n);
+  assert.equal(model.resolveDimension("9007199254740993", variables), 9007199254740993n);
+  assert.equal(model.parseIntegerExpression("2 * (col - 1)", variables), 6n);
+  assert.equal(
+    model.expandLegName("r$row,c$(col)-$(col+1)", variables),
+    "r3,c4-5"
+  );
+  assert.equal(model.expandLegName("cash$$$(row-4)", variables), "cash$-1");
+
+  const resolved = model.resolveNetworkVariables(
+    [
+      { name: "A", legs: [{ name: "r$row,c$(col)-$(col+1)", dim: "D" }] },
+      { name: "B", legs: [{ name: "r3,c4-5", dim: "4" }] },
+    ],
+    variables
+  );
+  assert.equal(resolved[0].legs[0].name, "r3,c4-5");
+  assert.equal(resolved[0].legs[0].dim, 4n);
+  assert.deepEqual(model.normalizeNetwork(resolved).tensors[1].legs[0], {
+    name: "r3,c4-5",
+    dim: 4n,
+  });
+});
+
+test("invalid variable registries, references, and interpolation expressions fail loudly", () => {
+  assert.throws(
+    () => model.normalizeVariables([{ name: "D", value: 4 }, { name: "D", value: 2 }]),
+    /duplicated/
+  );
+  assert.throws(() => model.normalizeVariables([{ name: "D", value: "0" }]), /positive integer/);
+  assert.throws(() => model.normalizeVariables([{ name: "not-valid", value: 2 }]), /identifier/);
+  const variables = model.normalizeVariables([{ name: "col", value: 4 }]);
+  assert.throws(() => model.resolveDimension("D", variables), /unknown variable 'D'/);
+  assert.throws(() => model.resolveDimension("col+1", variables), /positive integer or registered/);
+  assert.throws(() => model.expandLegName("r$row", variables), /unknown variable 'row'/);
+  assert.throws(() => model.expandLegName("c$(col+1", variables), /unclosed/);
+  assert.throws(() => model.expandLegName("c$(col/3)", variables), /exact integer division/);
+  assert.throws(() => model.expandLegName("c$(col%0)", variables), /divides by zero/);
+});
+
 test("invalid leg models fail loudly", () => {
   assert.throws(
     () =>

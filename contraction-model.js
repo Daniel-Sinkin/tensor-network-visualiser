@@ -64,6 +64,236 @@
     return domain === "complex" ? 2n * realBytes : realBytes;
   }
 
+  function normalizeVariables(input) {
+    if (!Array.isArray(input)) fail("variable registry must be a list");
+    const variables = new Map();
+    input.forEach((source, index) => {
+      const name = String(source && source.name != null ? source.name : "").trim();
+      if (!TENSOR_NAME_RE.test(name))
+        fail(`variable ${index + 1} needs an identifier such as D or chi`);
+      if (variables.has(name)) fail(`variable name '${name}' is duplicated`);
+      variables.set(name, parseDimension(source.value, `value of variable ${name}`));
+    });
+    return variables;
+  }
+
+  function resolveDimension(value, variablesInput, context) {
+    const variables = variablesInput instanceof Map
+      ? variablesInput
+      : normalizeVariables(variablesInput || []);
+    const label = context || "dimension";
+    if (typeof value === "bigint" || typeof value === "number")
+      return parseDimension(value, label);
+    const text = String(value == null ? "" : value).trim();
+    if (/^[1-9][0-9]*$/.test(text)) return BigInt(text);
+    if (TENSOR_NAME_RE.test(text)) {
+      if (!variables.has(text)) fail(`${label} references unknown variable '${text}'`);
+      return variables.get(text);
+    }
+    fail(`${label} must be a positive integer or registered variable`);
+  }
+
+  function parseIntegerExpression(source, variablesInput, context) {
+    const variables = variablesInput instanceof Map
+      ? variablesInput
+      : normalizeVariables(variablesInput || []);
+    const text = String(source == null ? "" : source);
+    const label = context || "interpolation expression";
+    const tokens = [];
+    let offset = 0;
+    while (offset < text.length) {
+      const ch = text[offset];
+      if (/\s/.test(ch)) {
+        offset++;
+        continue;
+      }
+      if (/[0-9]/.test(ch)) {
+        const start = offset++;
+        while (offset < text.length && /[0-9]/.test(text[offset])) offset++;
+        tokens.push({ type: "number", text: text.slice(start, offset), offset: start });
+        continue;
+      }
+      if (/[A-Za-z_]/.test(ch)) {
+        const start = offset++;
+        while (offset < text.length && /[A-Za-z0-9_]/.test(text[offset])) offset++;
+        tokens.push({ type: "name", text: text.slice(start, offset), offset: start });
+        continue;
+      }
+      if ("+-*/%()".includes(ch)) {
+        tokens.push({ type: ch, text: ch, offset });
+        offset++;
+        continue;
+      }
+      fail(`${label} contains unexpected '${ch}' at position ${offset + 1}`);
+    }
+    if (!tokens.length) fail(`${label} is empty`);
+
+    let cursor = 0;
+
+    function primary() {
+      const token = tokens[cursor];
+      if (!token) fail(`${label} ended early`);
+      if (token.type === "number") {
+        cursor++;
+        return BigInt(token.text);
+      }
+      if (token.type === "name") {
+        cursor++;
+        if (!variables.has(token.text))
+          fail(`${label} references unknown variable '${token.text}'`);
+        return variables.get(token.text);
+      }
+      if (token.type === "(") {
+        cursor++;
+        const value = expression();
+        if (!tokens[cursor] || tokens[cursor].type !== ")")
+          fail(`${label} is missing ')'`);
+        cursor++;
+        return value;
+      }
+      fail(`${label} expected an integer or variable at position ${token.offset + 1}`);
+    }
+
+    function unary() {
+      const token = tokens[cursor];
+      if (token && token.type === "+") {
+        cursor++;
+        return unary();
+      }
+      if (token && token.type === "-") {
+        cursor++;
+        return -unary();
+      }
+      return primary();
+    }
+
+    function term() {
+      let value = unary();
+      while (tokens[cursor] && ["*", "/", "%"].includes(tokens[cursor].type)) {
+        const operator = tokens[cursor++].type;
+        const right = unary();
+        if ((operator === "/" || operator === "%") && right === 0n)
+          fail(`${label} divides by zero`);
+        if (operator === "*") value *= right;
+        else if (operator === "/") {
+          if (value % right !== 0n) fail(`${label} requires exact integer division`);
+          value /= right;
+        } else value %= right;
+      }
+      return value;
+    }
+
+    function expression() {
+      let value = term();
+      while (tokens[cursor] && ["+", "-"].includes(tokens[cursor].type)) {
+        const operator = tokens[cursor++].type;
+        const right = term();
+        value = operator === "+" ? value + right : value - right;
+      }
+      return value;
+    }
+
+    const value = expression();
+    if (cursor !== tokens.length) {
+      const token = tokens[cursor];
+      fail(`${label} contains unexpected '${token.text}' at position ${token.offset + 1}`);
+    }
+    return value;
+  }
+
+  function expandLegName(template, variablesInput, context) {
+    const variables = variablesInput instanceof Map
+      ? variablesInput
+      : normalizeVariables(variablesInput || []);
+    const source = String(template == null ? "" : template);
+    const label = context || "leg name template";
+    let result = "";
+    let offset = 0;
+    while (offset < source.length) {
+      if (source[offset] !== "$") {
+        result += source[offset++];
+        continue;
+      }
+      if (source[offset + 1] === "$") {
+        result += "$";
+        offset += 2;
+        continue;
+      }
+      if (source[offset + 1] === "(") {
+        const start = offset + 2;
+        let cursor = start;
+        let depth = 1;
+        while (cursor < source.length && depth > 0) {
+          if (source[cursor] === "(") depth++;
+          else if (source[cursor] === ")") depth--;
+          cursor++;
+        }
+        if (depth !== 0) fail(`${label} has an unclosed '$(' expression`);
+        const expressionSource = source.slice(start, cursor - 1);
+        result += parseIntegerExpression(expressionSource, variables, `${label} '$(${expressionSource})'`);
+        offset = cursor;
+        continue;
+      }
+      if (/[A-Za-z_]/.test(source[offset + 1] || "")) {
+        const start = offset + 1;
+        let cursor = start + 1;
+        while (cursor < source.length && /[A-Za-z0-9_]/.test(source[cursor])) cursor++;
+        const name = source.slice(start, cursor);
+        if (!variables.has(name)) fail(`${label} references unknown variable '${name}'`);
+        result += variables.get(name);
+        offset = cursor;
+        continue;
+      }
+      fail(`${label} has '$' without a variable name or parenthesized expression`);
+    }
+    return result;
+  }
+
+  function resolveNetworkDimensions(input, variablesInput) {
+    if (!Array.isArray(input)) fail("tensor network must be a list");
+    const variables = variablesInput instanceof Map
+      ? variablesInput
+      : normalizeVariables(variablesInput || []);
+    return input.map((tensor, tensorIndex) => {
+      const tensorName = String(tensor && tensor.name != null ? tensor.name : "").trim() ||
+        `tensor ${tensorIndex + 1}`;
+      const legs = Array.isArray(tensor && tensor.legs) ? tensor.legs : [];
+      return {
+        ...tensor,
+        legs: legs.map((leg, legIndex) => {
+          const legName = String(leg && leg.name != null ? leg.name : "").trim() ||
+            `leg ${legIndex + 1}`;
+          return {
+            ...leg,
+            dim: resolveDimension(
+              leg && leg.dim,
+              variables,
+              `dimension of ${tensorName}.${legName}`
+            ),
+          };
+        }),
+      };
+    });
+  }
+
+  function resolveNetworkVariables(input, variablesInput) {
+    const variables = variablesInput instanceof Map
+      ? variablesInput
+      : normalizeVariables(variablesInput || []);
+    const resolved = resolveNetworkDimensions(input, variables);
+    return resolved.map((tensor, tensorIndex) => ({
+      ...tensor,
+      legs: tensor.legs.map((leg, legIndex) => ({
+        ...leg,
+        name: expandLegName(
+          input[tensorIndex].legs[legIndex].name,
+          variables,
+          `leg name of ${tensor.name || `tensor ${tensorIndex + 1}`} axis ${legIndex}`
+        ),
+      })),
+    }));
+  }
+
   function normalizeNetwork(input) {
     if (!Array.isArray(input) || input.length < 2) fail("enter at least two tensors");
     const names = new Set();
@@ -525,12 +755,18 @@
     PlannerError,
     buildPairPlan,
     evaluateTree,
+    expandLegName,
     flopFactor,
     normalizeNetwork,
+    normalizeVariables,
     optimizeNetwork,
     orderExpression,
     parseDimension,
+    parseIntegerExpression,
     parseOrder,
+    resolveDimension,
+    resolveNetworkDimensions,
+    resolveNetworkVariables,
     scalarBytes,
   };
 });

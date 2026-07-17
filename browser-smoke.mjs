@@ -135,6 +135,10 @@ try {
     const poll = () => {
       if (document.querySelector("#metricFlops").textContent !== "—") return resolve({
         badge: document.querySelector("#validityBadge").textContent,
+        variables: [...document.querySelectorAll(".variable-chip")].map((chip) => [
+          chip.querySelector(".variable-name-input").value,
+          chip.querySelector(".variable-value-input").value,
+        ]),
         tensorEditors: document.querySelectorAll(".tensor-editor").length,
         connections: document.querySelectorAll(".svg-shared-line").length,
         connectionLabels: [...document.querySelectorAll(".svg-wire-label")].map((node) => node.textContent),
@@ -154,61 +158,132 @@ try {
   })`);
   assert.deepEqual(initial, {
     badge: "Valid contraction",
+    variables: [["D", "4"], ["d", "2"]],
     tensorEditors: 2,
     connections: 2,
-    connectionLabels: ["spin:3", "bond:5"],
-    outputRank: "rank 3 · [2 × 7 × 11]",
-    outputLegs: ["axis 0 · batch : 2", "axis 1 · left : 7", "axis 2 · out : 11"],
-    flops: "18,480",
-    macs: "2,310",
-    scratch: "2.92 KiB",
-    gemm: "(14 × 15) · (15 × 11) → (14 × 11)",
-    permutationA: "axes [0, 3, 1, 2] → [batch, left, spin, bond] · reshape 14 × 15",
-    permutationB: "axes [2, 1, 0] → [spin, bond, out] · reshape 15 × 11",
+    connectionLabels: ["spin:d=2", "bond:D=4"],
+    outputRank: "rank 3 · [d × D × D] = [2 × 4 × 4]",
+    outputLegs: [
+      "axis 0 · batch : d (= 2)",
+      "axis 1 · left : D (= 4)",
+      "axis 2 · out : D (= 4)",
+    ],
+    flops: "2,048",
+    macs: "256",
+    scratch: "768 B",
+    gemm: "(8 × 8) · (8 × 4) → (8 × 4)",
+    permutationA: "axes [0, 3, 1, 2] → [batch, left, spin, bond] · reshape 8 × 8",
+    permutationB: "axes [2, 1, 0] → [spin, bond, out] · reshape 8 × 4",
   });
 
-  const renamed = await evaluate(`new Promise((resolve, reject) => {
-    const names = document.querySelectorAll("#legsB .leg-name-input");
-    names[2].value = "channel";
-    names[2].dispatchEvent(new Event("input", { bubbles: true }));
+  const resized = await evaluate(`new Promise((resolve, reject) => {
+    const value = document.querySelectorAll(".variable-value-input")[0];
+    value.value = "5";
+    value.dispatchEvent(new Event("input", { bubbles: true }));
     const deadline = Date.now() + 3000;
     const poll = () => {
-      if (
-        document.querySelectorAll(".svg-shared-line").length === 1 &&
-        document.querySelector("#metricFlops").textContent === "55,440"
-      ) {
-        return resolve({
-          connections: document.querySelectorAll(".svg-shared-line").length,
-          labels: [...document.querySelectorAll(".svg-wire-label")].map((node) => node.textContent),
-          outputRank: document.querySelector("#outputRank").textContent,
-          outputLegs: [...document.querySelectorAll("#outputLegs .output-leg")].map((node) => node.textContent),
-          flops: document.querySelector("#metricFlops").textContent,
-        });
-      }
-      if (Date.now() > deadline) return reject(new Error("renamed leg did not update the workbench"));
+      if (document.querySelector("#metricFlops").textContent === "4,000") return resolve({
+        labels: [...document.querySelectorAll(".svg-wire-label")].map((node) => node.textContent),
+        outputRank: document.querySelector("#outputRank").textContent,
+        flops: document.querySelector("#metricFlops").textContent,
+        output: document.querySelector("#metricOutput").textContent,
+        scratch: document.querySelector("#metricScratch").textContent,
+      });
+      if (Date.now() > deadline) return reject(new Error("variable value did not update costs"));
       setTimeout(poll, 20);
     };
     poll();
   })`);
-  assert.deepEqual(renamed, {
-    connections: 1,
-    labels: ["bond:5"],
-    outputRank: "rank 5 · [2 × 3 × 7 × 11 × 3]",
-    outputLegs: [
-      "axis 0 · batch : 2",
-      "axis 1 · spin : 3",
-      "axis 2 · left : 7",
-      "axis 3 · out : 11",
-      "axis 4 · channel : 3",
-    ],
-    flops: "55,440",
+  assert.deepEqual(resized, {
+    labels: ["spin:d=2", "bond:D=5"],
+    outputRank: "rank 3 · [d × D × D] = [2 × 5 × 5]",
+    flops: "4,000",
+    output: "400 B",
+    scratch: "1.17 KiB",
+  });
+
+  const interpolated = await evaluate(`new Promise((resolve, reject) => {
+    document.querySelector("#resetButton").click();
+    const deadline = Date.now() + 3000;
+    const waitForReset = () => {
+      if (document.querySelector("#metricFlops").textContent !== "2,048") {
+        if (Date.now() > deadline) return reject(new Error("reset did not restore variables"));
+        return setTimeout(waitForReset, 20);
+      }
+      const add = document.querySelector("#addVariableButton");
+      add.click();
+      let chip = document.querySelector(".variable-chip:last-child");
+      chip.querySelector(".variable-name-input").value = "row";
+      chip.querySelector(".variable-name-input").dispatchEvent(new Event("input", { bubbles: true }));
+      chip.querySelector(".variable-value-input").value = "3";
+      chip.querySelector(".variable-value-input").dispatchEvent(new Event("input", { bubbles: true }));
+      add.click();
+      chip = document.querySelector(".variable-chip:last-child");
+      chip.querySelector(".variable-name-input").value = "col";
+      chip.querySelector(".variable-name-input").dispatchEvent(new Event("input", { bubbles: true }));
+      chip.querySelector(".variable-value-input").value = "4";
+      chip.querySelector(".variable-value-input").dispatchEvent(new Event("input", { bubbles: true }));
+
+      const namesA = document.querySelectorAll("#legsA .leg-name-input");
+      const namesB = document.querySelectorAll("#legsB .leg-name-input");
+      const dimsB = document.querySelectorAll("#legsB .leg-dim-input");
+      namesA[0].value = "r$row,c$(col)-$(col+1)";
+      namesA[0].dispatchEvent(new Event("input", { bubbles: true }));
+      namesB[0].value = "r$row,c$(col)-$(col+1)";
+      namesB[0].dispatchEvent(new Event("input", { bubbles: true }));
+      dimsB[0].value = "d";
+      dimsB[0].dispatchEvent(new Event("input", { bubbles: true }));
+      pollExpanded();
+    };
+    const pollExpanded = () => {
+      const labels = [...document.querySelectorAll(".svg-wire-label")].map((node) => node.textContent);
+      if (labels[0] === "r3,c4-5:d=2" && document.querySelector("#metricFlops").textContent === "512") {
+        const first = {
+          variables: [...document.querySelectorAll(".variable-chip")].map((chip) => [
+            chip.querySelector(".variable-name-input").value,
+            chip.querySelector(".variable-value-input").value,
+          ]),
+          expansions: [...document.querySelectorAll(".leg-expansion")].map((node) => node.textContent).filter(Boolean),
+          labels,
+          outputRank: document.querySelector("#outputRank").textContent,
+          outputLegs: [...document.querySelectorAll("#outputLegs .output-leg")].map((node) => node.textContent),
+          flops: document.querySelector("#metricFlops").textContent,
+        };
+        const colValue = [...document.querySelectorAll(".variable-chip")]
+          .find((chip) => chip.querySelector(".variable-name-input").value === "col")
+          .querySelector(".variable-value-input");
+        colValue.value = "6";
+        colValue.dispatchEvent(new Event("input", { bubbles: true }));
+        return pollUpdated(first);
+      }
+      if (Date.now() > deadline) return reject(new Error("leg name templates did not expand"));
+      setTimeout(pollExpanded, 20);
+    };
+    const pollUpdated = (first) => {
+      const labels = [...document.querySelectorAll(".svg-wire-label")].map((node) => node.textContent);
+      if (labels[0] === "r3,c6-7:d=2") return resolve({ first, updatedLabels: labels });
+      if (Date.now() > deadline) return reject(new Error("template did not follow variable update"));
+      setTimeout(() => pollUpdated(first), 20);
+    };
+    waitForReset();
+  })`);
+  assert.deepEqual(interpolated, {
+    first: {
+      variables: [["D", "4"], ["d", "2"], ["row", "3"], ["col", "4"]],
+      expansions: ["→ r3,c4-5", "→ r3,c4-5"],
+      labels: ["r3,c4-5:d=2", "spin:d=2", "bond:D=4"],
+      outputRank: "rank 1 · [D] = [4]",
+      outputLegs: ["axis 0 · left : D (= 4)"],
+      flops: "512",
+    },
+    updatedLabels: ["r3,c6-7:d=2", "spin:d=2", "bond:D=4"],
   });
 
   const controls = await evaluate(`new Promise((resolve, reject) => {
     document.querySelector("#resetButton").click();
     const deadline = Date.now() + 3000;
     const waitForReset = () => {
-      if (document.querySelector("#metricFlops").textContent === "18,480") {
+      if (document.querySelector("#metricFlops").textContent === "2,048") {
         document.querySelector('input[name="arithmetic"][value="real"]').click();
         return waitForReal();
       }
@@ -216,7 +291,7 @@ try {
       setTimeout(waitForReset, 20);
     };
     const waitForReal = () => {
-      if (document.querySelector("#metricFlops").textContent === "4,620") {
+      if (document.querySelector("#metricFlops").textContent === "512") {
         const realF32 = {
           flops: document.querySelector("#metricFlops").textContent,
           output: document.querySelector("#metricOutput").textContent,
@@ -229,7 +304,7 @@ try {
       setTimeout(waitForReal, 20);
     };
     const waitForF64 = (realF32) => {
-      if (document.querySelector("#metricOutput").textContent === "1.20 KiB") {
+      if (document.querySelector("#metricOutput").textContent === "256 B") {
         return resolve({
           realF32,
           realF64: {
@@ -247,8 +322,8 @@ try {
     waitForReset();
   })`);
   assert.deepEqual(controls, {
-    realF32: { flops: "4,620", output: "616 B", scratch: "1.46 KiB" },
-    realF64: { flops: "4,620", output: "1.20 KiB", scratch: "2.92 KiB" },
+    realF32: { flops: "512", output: "128 B", scratch: "384 B" },
+    realF64: { flops: "512", output: "256 B", scratch: "768 B" },
     realChecked: true,
     f64Checked: true,
   });
@@ -258,8 +333,8 @@ try {
     const deadline = Date.now() + 3000;
     const edit = () => {
       const inputs = document.querySelectorAll("#legsB .leg-dim-input");
-      if (inputs.length === 3 && document.querySelector("#metricFlops").textContent === "18,480") {
-        inputs[2].value = "4";
+      if (inputs.length === 3 && document.querySelector("#metricFlops").textContent === "2,048") {
+        inputs[2].value = "D";
         inputs[2].dispatchEvent(new Event("input", { bubbles: true }));
         return poll();
       }
@@ -279,7 +354,7 @@ try {
     };
     edit();
   })`);
-  assert.match(invalid.error, /mismatched dimensions 3 on A and 4 on B/);
+  assert.match(invalid.error, /mismatched dimensions 2 on A and 4 on B/);
   assert.equal(invalid.badge, "Invalid input");
   assert.equal(invalid.flops, "—");
   assert.equal(invalid.output, "not available");
@@ -303,7 +378,7 @@ try {
   });
   assert.deepEqual(browserErrors, []);
 
-  console.log(JSON.stringify({ initial, renamed, controls, invalid, visualizer, browserErrors }, null, 2));
+  console.log(JSON.stringify({ initial, resized, interpolated, controls, invalid, visualizer, browserErrors }, null, 2));
 } finally {
   if (socket) socket.close();
   chrome.kill("SIGTERM");
