@@ -3,106 +3,131 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tensor Contraction Planner</title>
+<title>Two-Tensor Contraction Workbench</title>
 <link rel="stylesheet" href="contraction-planner.css">
 </head>
 <body>
 <header class="topbar">
   <div>
     <div class="eyebrow">Tensor Network Visualiser</div>
-    <h1>Contraction planner</h1>
-    <p>Match axes by string leg name, inspect the exact reshape-to-GEMM lowering, and compare contraction orders.</p>
+    <h1>Two-tensor contraction</h1>
+    <p>Edit the ordered legs of A and B. Matching names connect automatically; C and the implementation cost update live.</p>
   </div>
   <a class="canvas-link" href="tensor-network-visualiser.html">Open visual canvas</a>
 </header>
 
-<div class="presetbar" aria-label="Examples and arithmetic settings">
-  <div class="preset-group">
-    <span class="toolbar-label">Examples</span>
-    <button type="button" class="quiet-button preset-button" data-preset="matmul">Matrix multiply</button>
-    <button type="button" class="quiet-button preset-button" data-preset="multileg">Multi-leg reshape</button>
-    <button type="button" class="quiet-button preset-button" data-preset="chain">Three-tensor chain</button>
-  </div>
-  <div class="settings-group">
-    <label>Arithmetic
-      <select id="arithmeticSelect">
-        <option value="complex">Complex</option>
-        <option value="real">Real</option>
-      </select>
-    </label>
-    <label>Precision
-      <select id="precisionSelect">
-        <option value="f32">f32</option>
-        <option value="f64">f64</option>
-      </select>
-    </label>
-  </div>
-</div>
-
-<main class="workspace">
-  <section class="editor-column" aria-labelledby="tensorHeading">
-    <div class="section-heading">
-      <div>
-        <div class="eyebrow">Network input</div>
-        <h2 id="tensorHeading">Tensors and ordered legs</h2>
-      </div>
-      <button type="button" id="addTensorButton" class="primary-button">Add tensor</button>
+<main class="page-shell">
+  <section class="control-bar" aria-label="Arithmetic and precision">
+    <div class="control-intro">
+      <span class="live-dot" aria-hidden="true"></span>
+      <span>Live model</span>
     </div>
-    <p class="section-note">Leg names are exact and case-sensitive. A name appearing on two tensors is contracted; a name appearing once remains free.</p>
-    <div id="tensorList" class="tensor-list"></div>
-
-    <section class="order-panel" aria-labelledby="orderHeading">
-      <div class="section-heading compact-heading">
-        <div>
-          <div class="eyebrow">Execution</div>
-          <h2 id="orderHeading">Contraction order</h2>
-        </div>
-      </div>
-      <label class="order-label" for="orderInput">Binary expression</label>
-      <input id="orderInput" class="order-input" type="text" spellcheck="false" autocomplete="off" placeholder="((A*B)*C)">
-      <p class="field-help">Unparenthesized products are left-associative. Every tensor must appear exactly once.</p>
-      <div class="action-row">
-        <button type="button" id="evaluateButton" class="primary-button">Evaluate order</button>
-        <button type="button" id="minFlopsButton" class="secondary-button">Minimum FLOPs</button>
-        <button type="button" id="minPeakButton" class="secondary-button">Minimum peak</button>
-      </div>
-      <div id="statusLine" class="status-line" role="status" aria-live="polite"></div>
-      <div id="errorBox" class="error-box" role="alert" hidden></div>
-    </section>
+    <fieldset class="segmented-control">
+      <legend>Arithmetic</legend>
+      <label>
+        <input type="radio" name="arithmetic" value="real">
+        <span>Real</span>
+      </label>
+      <label>
+        <input type="radio" name="arithmetic" value="complex" checked>
+        <span>Complex</span>
+      </label>
+    </fieldset>
+    <fieldset class="segmented-control">
+      <legend>Precision</legend>
+      <label>
+        <input type="radio" name="precision" value="f32" checked>
+        <span>f32</span>
+      </label>
+      <label>
+        <input type="radio" name="precision" value="f64">
+        <span>f64</span>
+      </label>
+    </fieldset>
+    <button type="button" id="resetButton" class="reset-button">Reset example</button>
   </section>
 
-  <section class="result-column" aria-labelledby="resultHeading">
-    <div class="section-heading">
+  <section class="workbench" aria-labelledby="workbenchHeading">
+    <div class="workbench-heading">
       <div>
-        <div class="eyebrow">Lowering and cost</div>
-        <h2 id="resultHeading">Contraction result</h2>
+        <div class="eyebrow">A × B → C</div>
+        <h2 id="workbenchHeading">Contraction panel</h2>
       </div>
-      <div id="resultBadge" class="result-badge">Manual order</div>
+      <div id="validityBadge" class="validity-badge valid">Valid contraction</div>
     </div>
-    <div id="resultBody"></div>
+
+    <div id="errorBox" class="error-box" role="alert" hidden></div>
+
+    <div class="diagram-shell">
+      <svg id="networkDiagram" class="network-diagram" viewBox="0 0 1000 410" role="img" aria-label="Live diagram of tensors A and B contracting into output C"></svg>
+    </div>
+
+    <div class="editor-grid" aria-label="Input tensor legs">
+      <article class="tensor-editor tensor-a">
+        <header class="tensor-editor-header">
+          <div class="tensor-identity"><span class="tensor-letter">A</span><div><strong>Tensor A</strong><span>left operand</span></div></div>
+          <div id="shapeA" class="tensor-shape">rank 0</div>
+        </header>
+        <div class="leg-table-heading"><span>Axis</span><span>Leg name</span><span>Dimension</span><span>Order</span></div>
+        <div id="legsA" class="leg-list"></div>
+        <button type="button" id="addLegA" class="add-leg-button">+ Add leg to A</button>
+      </article>
+
+      <article class="tensor-editor tensor-b">
+        <header class="tensor-editor-header">
+          <div class="tensor-identity"><span class="tensor-letter">B</span><div><strong>Tensor B</strong><span>right operand</span></div></div>
+          <div id="shapeB" class="tensor-shape">rank 0</div>
+        </header>
+        <div class="leg-table-heading"><span>Axis</span><span>Leg name</span><span>Dimension</span><span>Order</span></div>
+        <div id="legsB" class="leg-list"></div>
+        <button type="button" id="addLegB" class="add-leg-button">+ Add leg to B</button>
+      </article>
+    </div>
+
+    <section class="output-panel" aria-labelledby="outputHeading">
+      <div class="output-heading">
+        <div class="output-identity"><span class="tensor-letter output-letter">C</span><div><strong id="outputHeading">Output tensor C</strong><span>free A axes followed by free B axes</span></div></div>
+        <div id="outputRank" class="tensor-shape">rank 0</div>
+      </div>
+      <div id="outputLegs" class="output-legs"></div>
+    </section>
+
+    <section class="cost-panel" aria-labelledby="costHeading">
+      <div class="section-label" id="costHeading">Exact contraction cost</div>
+      <div class="metric-grid">
+        <article class="metric-card primary-metric"><span>Real FLOPs</span><strong id="metricFlops">—</strong><small id="metricFlopsNote">—</small></article>
+        <article class="metric-card"><span>Scalar MACs</span><strong id="metricMacs">—</strong><small>multiply-accumulate positions</small></article>
+        <article class="metric-card"><span>Output storage</span><strong id="metricOutput">—</strong><small id="metricOutputNote">—</small></article>
+        <article class="metric-card"><span>Permutation scratch</span><strong id="metricScratch">—</strong><small id="metricScratchNote">two operand buffers</small></article>
+        <article class="metric-card"><span>Step workspace</span><strong id="metricWorkspace">—</strong><small>scratch plus output</small></article>
+      </div>
+    </section>
+
+    <section class="lowering-panel" aria-labelledby="loweringHeading">
+      <div class="section-label" id="loweringHeading">Reshape-to-GEMM lowering</div>
+      <div class="shared-summary"><span>Contracted by name</span><strong id="sharedLegs">—</strong></div>
+      <div class="lowering-grid">
+        <article class="lowering-card">
+          <div class="lowering-title"><span>A → [free, shared]</span><span id="badgeA" class="permutation-badge">—</span></div>
+          <code id="permutationA">—</code>
+        </article>
+        <article class="lowering-card gemm-card">
+          <div class="lowering-title"><span>Matrix multiply</span></div>
+          <code id="gemmEquation">—</code>
+        </article>
+        <article class="lowering-card">
+          <div class="lowering-title"><span>B → [shared, free]</span><span id="badgeB" class="permutation-badge">—</span></div>
+          <code id="permutationB">—</code>
+        </article>
+      </div>
+      <p class="implementation-note">Axis indices are zero-based. Scratch follows the current CUDA path, which materializes both permuted operands before GEMM.</p>
+    </section>
   </section>
 </main>
 
-<template id="tensorTemplate">
-  <article class="tensor-card">
-    <div class="tensor-card-header">
-      <label>Tensor name
-        <input class="tensor-name-input" type="text" maxlength="40" spellcheck="false" autocomplete="off">
-      </label>
-      <button type="button" class="icon-button remove-tensor-button" title="Remove tensor" aria-label="Remove tensor">×</button>
-    </div>
-    <div class="leg-table-heading">
-      <span>Leg name</span>
-      <span>Dimension</span>
-      <span>Axis order</span>
-    </div>
-    <div class="leg-list"></div>
-    <button type="button" class="add-leg-button">+ Add leg</button>
-  </article>
-</template>
-
-<template id="legTemplate">
+<template id="legRowTemplate">
   <div class="leg-row">
+    <span class="axis-index"></span>
     <input class="leg-name-input" type="text" maxlength="80" spellcheck="false" autocomplete="off" aria-label="Leg name">
     <input class="leg-dim-input" type="text" inputmode="numeric" spellcheck="false" autocomplete="off" aria-label="Leg dimension">
     <div class="leg-actions">

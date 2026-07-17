@@ -2,13 +2,12 @@
 
 This repository contains two browser tools:
 
-- `contraction-planner.html` models abstract tensor contractions from ordered, string-named legs.
-  It evaluates a supplied pairwise order or searches for a minimum-FLOP or
-  minimum-peak-intermediate order.
+- `contraction-planner.html` is a focused two-tensor contraction workbench. It connects matching
+  string-named legs, displays the output tensor, and reports the exact reshape and cost live.
 - `tensor-network-visualiser.html` is the existing interactive tensor-network canvas. Its
   numerical MPS/MPO contraction action can use the optional Julia server in `server.jl`.
 
-## Contraction planner
+## Two-tensor contraction workbench
 
 Open `contraction-planner.html` directly in a browser. No build, package install, or backend is
 required. A local web server is also convenient:
@@ -19,41 +18,42 @@ python3 -m http.server 8765
 
 Then visit <http://127.0.0.1:8765/contraction-planner.html>.
 
-Each tensor has a unique identifier and an ordered list of legs. A leg is an exact,
-case-sensitive string name and a positive integer dimension. A name appearing on two different
-tensors identifies a contracted pair; a name appearing once is a free leg. The first release
-rejects self-traces and names appearing on more than two tensors.
+The workbench always contains input tensors A and B and output tensor C. Edit the ordered leg
+rows beneath A and B:
 
-Manual orders use tensor identifiers, `*`, and parentheses. Whitespace is ignored, and an
-unparenthesized expression is left-associative:
+- a leg name appearing on both tensors is contracted and connected in the diagram;
+- a name appearing on only one tensor remains free and becomes an axis of C;
+- names are exact and case-sensitive after trimming;
+- dimensions are arbitrary-size positive integers;
+- shared names must have the same dimension on both sides.
+
+Leg rows may be added, removed, and reordered, but the workflow remains one fixed contraction,
+`A * B`. C updates immediately and orders its axes as free A legs followed by free B legs.
+
+The controls above the panel select real or complex arithmetic and f32 or f64 storage. Every
+valid edit updates:
+
+- the shared-leg connections and output dimensions;
+- scalar multiply-accumulate positions and conventional real FLOPs;
+- output storage, two-operand permutation scratch, and per-step workspace;
+- the exact A and B axis permutations;
+- the `M x K` by `K x N` matrix multiplication.
+
+The lowering matches the current cuQuantumNaturalfPEPS Julia and CUDA helpers:
 
 ```text
-A * B * C
-A * (B * C)
-((A * B) * C)
+A [free-A, shared] -> M x K
+B [shared, free-B] -> K x N
+C [free-A, free-B]
 ```
 
-For every binary step, the planner shows the actual reshape-to-matrix-multiply lowering:
+Shared axes are ordered by their position on A, and B is permuted to the same name order. One real
+MAC is reported as two real FLOPs and one complex MAC as eight. Counts use JavaScript `BigInt`, so
+large dimensions are not rounded.
 
-```text
-left  [free-left, shared]  -> M x K
-right [shared, free-right] -> K x N
-result [free-left, free-right]
-```
-
-Shared axes are ordered by their position on the left operand. The right operand is permuted to
-the same shared-name order. This mirrors the current cuQuantumNaturalfPEPS Julia and CUDA
-contraction helpers and makes the required axis permutations explicit.
-
-The scalar MAC count for a step is `M*K*N`. The UI reports that exact integer separately from
-conventional real FLOPs: two FLOPs per real MAC or eight per complex MAC. Choosing `f32` or `f64`
-changes storage and workspace estimates, but not the arithmetic count. Counts use JavaScript
-`BigInt`, so large dimensions are not rounded.
-
-Both optimization objectives consider all binary contraction trees. Search is exact subset
-dynamic programming through 14 input tensors. Larger networks use a deterministic greedy
-fallback and are clearly labeled heuristic. The detailed scope and acceptance criteria are in
-`DESIGN.md`.
+The reusable model in `contraction-model.js` still contains the tested manual-order evaluator and
+multi-tensor exact/heuristic optimizer. They are deliberately not exposed in this first fixed
+workflow. The current interaction contract is in `DESIGN.md`.
 
 ## Tests
 
@@ -63,16 +63,16 @@ The model tests require Node.js:
 node --test contraction-model.test.mjs
 ```
 
-The end-to-end smoke test additionally requires Google Chrome (override its executable with the
-`CHROME` environment variable):
+The end-to-end test additionally requires Google Chrome. Override the executable with `CHROME` if
+needed:
 
 ```sh
 node browser-smoke.mjs
 ```
 
-The smoke test opens the real page in headless Chrome, checks a multi-leg permutation, verifies
-the exact matrix-chain optimum and FLOP count, and confirms dimension mismatches surface as UI
-errors.
+It opens the real page in headless Chrome and checks the fixed A/B editors, automatic connection
+changes, C's axes, cost totals, arithmetic and precision controls, invalid dimensions, and the
+link back to the existing canvas.
 
 ## Optional Julia contraction server
 
@@ -82,5 +82,5 @@ The visual canvas can call its existing local Julia endpoint for numerical MPS/M
 julia --project=. server.jl
 ```
 
-It listens on `http://127.0.0.1:8754`. The abstract contraction planner is independent of this
+It listens on `http://127.0.0.1:8754`. The abstract contraction workbench is independent of this
 server and does not execute tensor values or CUDA kernels.
